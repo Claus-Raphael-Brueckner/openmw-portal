@@ -650,7 +650,7 @@ namespace MWRender
                 const float lyAbs = std::min(std::abs(ly), kMaxDepth);
 
                 const osg::Vec3f camPos = portal.destDoorPos
-                    + forward * lyAbs
+                    - forward * lyAbs
                     - right   * local.x()
                     + upVec   * local.z();
 
