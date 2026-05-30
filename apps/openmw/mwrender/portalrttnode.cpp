@@ -50,7 +50,7 @@ void PortalRTTNode::apply(osg::Camera* camera)
 {
     camera->setViewMatrix(mViewMatrix);
     camera->setProjectionMatrix(mProjMatrix);
-    camera->setCullMask(Mask_Scene | Mask_Terrain | Mask_Static | Mask_Object | Mask_Lighting);
+    camera->setCullMask(Mask_Scene | Mask_Terrain | Mask_Static | Mask_Object | Mask_Lighting | Mask_ParticleSystem);
     // Mask_PortalQuad intentionally excluded: portal quads must not appear inside RTT views.
 
     // Update the clip plane in WORLD space. glClipPlane transforms by the current model-view

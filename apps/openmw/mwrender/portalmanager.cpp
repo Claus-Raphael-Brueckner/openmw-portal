@@ -23,7 +23,9 @@
 #include <osg/StateSet>
 #include <osg/Texture2D>
 
+#include <osg/NodeCallback>
 #include <osgUtil/CullVisitor>
+#include <components/sceneutil/lightcontroller.hpp>
 
 #include <components/esm3/loadacti.hpp>
 #include <components/esm3/loadcont.hpp>
@@ -38,6 +40,7 @@
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/lightcommon.hpp>
 #include <components/sceneutil/lightmanager.hpp>
+#include <components/sceneutil/util.hpp>
 #include <components/sceneutil/lightutil.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/sceneutil/shadow.hpp>
@@ -48,6 +51,7 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/ptr.hpp"
@@ -99,6 +103,78 @@ namespace MWRender
         private:
             osg::ref_ptr<PortalRTTNode> mRTT;
             osg::ref_ptr<osg::Program>  mProgram;
+        };
+
+        // Cull callback on the LightManager: re-populates mLights and clears the view-space
+        // cache every frame. Needed because RTTNode is an osg::Node — the OSG update traversal
+        // never reaches the internal camera subtree, so LightManagerUpdateCallback never fires
+        // and mLightsInViewSpace accumulates stale view-space positions causing flickering.
+        class PortalLightRefresher : public osg::NodeCallback
+        {
+        public:
+            struct Entry
+            {
+                osg::ref_ptr<SceneUtil::LightSource>    ls;
+                osg::Vec3f                              pos;
+                // Direct pointer into the callback chain (owned by ls via addUpdateCallback).
+                // Used to drive flicker/pulse without going through the full OSG update traversal,
+                // which crashes because CollectLightCallback modifies the LightManager and
+                // osgUtil::UpdateVisitor propagates dirty-counts up parent chains outside update pass.
+                SceneUtil::LightController*             ctrl = nullptr;
+            };
+
+            PortalLightRefresher(SceneUtil::LightManager* lm) : mLightManager(lm) {}
+
+            void add(osg::ref_ptr<SceneUtil::LightSource> ls, const osg::Vec3f& pos)
+            {
+                // createLightSource chains: CollectLightCallback -> LightController
+                // getNestedCallback() skips CollectLightCallback to reach LightController directly.
+                auto* nested = ls->getUpdateCallback() ? ls->getUpdateCallback()->getNestedCallback() : nullptr;
+                mEntries.push_back({ ls, pos, dynamic_cast<SceneUtil::LightController*>(nested) });
+            }
+
+            void setStatics(osg::Group* statics) { mStatics = statics; }
+
+            void operator()(osg::Node* node, osg::NodeVisitor* nv) override
+            {
+                // Drive LightController (flicker/pulse) directly, bypassing CollectLightCallback.
+                // TRAVERSE_NONE prevents any scene-graph modification from this path.
+                osg::NodeVisitor fakeNv(osg::NodeVisitor::UPDATE_VISITOR,
+                                        osg::NodeVisitor::TRAVERSE_NONE);
+                fakeNv.setFrameStamp(const_cast<osg::FrameStamp*>(nv->getFrameStamp()));
+                fakeNv.setTraversalNumber(nv->getTraversalNumber());
+                for (const auto& e : mEntries)
+                    if (e.ctrl) (*e.ctrl)(e.ls.get(), &fakeNv);
+
+                // Drive osgParticle emitters and ParticleSystemUpdater in the statics subtree
+                // (torch flames, candles, etc.) using a plain NodeVisitor — NOT osgUtil::UpdateVisitor,
+                // which propagates dirty-counts up parent chains and crashes inside a cull callback.
+                if (mStatics)
+                {
+                    osg::NodeVisitor staticsNv(osg::NodeVisitor::UPDATE_VISITOR,
+                                               osg::NodeVisitor::TRAVERSE_ALL_CHILDREN);
+                    staticsNv.setFrameStamp(const_cast<osg::FrameStamp*>(nv->getFrameStamp()));
+                    staticsNv.setTraversalNumber(nv->getTraversalNumber());
+                    mStatics->accept(staticsNv);
+                }
+
+                // Clears mLights and mLightsInViewSpace, then re-adds lights with fresh
+                // world matrices so getLightsInViewSpace rebuilds view-space positions
+                // against the current RTT camera view matrix this frame.
+                mLightManager->update(nv->getTraversalNumber());
+                for (const auto& e : mEntries)
+                {
+                    osg::Matrixf worldMat;
+                    worldMat.setTrans(e.pos);
+                    mLightManager->addLight(e.ls.get(), worldMat, nv->getTraversalNumber());
+                }
+                traverse(node, nv);  // chains to LightManagerCullCallback
+            }
+
+        private:
+            SceneUtil::LightManager*        mLightManager;
+            osg::ref_ptr<osg::Group>        mStatics;
+            std::vector<Entry>              mEntries;
         };
 
         // Load static geometry from the destination cell into a plain group.
@@ -189,7 +265,8 @@ namespace MWRender
             }
             addRefs(cellStore->getReadOnlyContainers().mList);
             addRefs(cellStore->getReadOnlyActivators().mList);
-            addRefs(cellStore->getReadOnlyLights().mList);  // mesh geometry of torches, candles, etc.
+
+            addRefs(cellStore->getReadOnlyLights().mList);
 
             return group;
         }
@@ -203,6 +280,11 @@ namespace MWRender
         {
             constexpr float kMaxDist = 5000.f;
             osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, kMaxDist);
+            // One LightListCallback on the whole group with an explicit large bound so it always
+            // intersects with any light in the scene. Individual PAT bounds may be invalid before
+            // the first render, causing per-PAT callbacks to silently skip all lights.
+            statics->setInitialBound(osg::BoundingSphere(osg::Vec3f(destCenter), kMaxDist));
+            statics->addCullCallback(new SceneUtil::LightListCallback);
 
             osg::ref_ptr<SceneUtil::LightManager> lightManager
                 = new SceneUtil::LightManager(SceneUtil::LightSettings{
@@ -210,6 +292,11 @@ namespace MWRender
                     .mMaxLights = Settings::shaders().mMaxLights,
                 });
             lightManager->setStartLight(1);
+            // Disable distance-based fade: getLightsInViewSpace permanently multiplies
+            // light->getDiffuse() by the fade factor when mPointLightFadeEnd != 0. Called
+            // every frame by PortalLightRefresher, this accumulates into black. mPointLightFadeEnd=0
+            // short-circuits the fade branch entirely.
+            lightManager->processChangedSettings(1.f, 0.f, 0.f);
 
             osg::ref_ptr<osg::StateSet> ss = lightManager->getOrCreateStateSet();
             ss->setDefine("FORCE_OPAQUE", "1", osg::StateAttribute::ON);
@@ -240,16 +327,30 @@ namespace MWRender
             dummyTex->setShadowCompareFunc(osg::Texture::ShadowCompareFunc::ALWAYS);
             ss->setTextureAttributeAndModes(7, dummyTex, osg::StateAttribute::ON);
 
-            // Simple overhead directional light so the scene is visible.
+            // Directional light using the destination cell's own ambient and directional colours,
+            // matching how RenderingManager::configureAmbient sets up interior cell lighting.
+            osg::Vec4f ambient(0.3f, 0.3f, 0.3f, 1.f);
+            osg::Vec4f diffuse(0.7f, 0.7f, 0.7f, 1.f);
+            if (cellStore)
+            {
+                const MWWorld::Cell* cell = cellStore->getCell();
+                ambient = SceneUtil::colourFromRGB(cell->getMood().mAmbiantColor);
+                diffuse = SceneUtil::colourFromRGB(cell->getMood().mDirectionalColor);
+
+            }
+
+            // Ambient goes on LightModel (matches CharacterPreview pattern and OpenMW shader expectations).
             osg::ref_ptr<osg::LightModel> lightModel = new osg::LightModel;
-            lightModel->setAmbientIntensity(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
+            lightModel->setAmbientIntensity(ambient);
             ss->setAttributeAndModes(lightModel, osg::StateAttribute::ON);
 
+            // Interior sun position matches Morrowind's convention (same as RenderingManager).
+            static const osg::Vec4f interiorSunPos(-1.f, osg::DegreesToRadians(45.f), osg::DegreesToRadians(45.f), 0.f);
             osg::ref_ptr<osg::Light> light = new osg::Light;
             light->setLightNum(0);
-            light->setPosition(osg::Vec4f(0.f, 0.f, 1.f, 0.f));
-            light->setAmbient(osg::Vec4f(0.3f, 0.3f, 0.3f, 1.f));
-            light->setDiffuse(osg::Vec4f(1.f, 1.f, 1.f, 1.f));
+            light->setPosition(interiorSunPos);
+            light->setAmbient(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
+            light->setDiffuse(diffuse);
             light->setSpecular(osg::Vec4f(0.f, 0.f, 0.f, 0.f));
             light->setConstantAttenuation(1.f);
             light->setLinearAttenuation(0.f);
@@ -260,37 +361,44 @@ namespace MWRender
             lightSource->setLight(light);
             lightSource->setStateSetModes(*ss, osg::StateAttribute::ON);
             lightManager->addChild(lightSource);
-            lightManager->addChild(statics);
 
-            // Add SceneUtil::LightSource nodes for each ESM light in the destination cell.
-            // The LightManager tracks these and assigns the nearest ones per rendered object.
+            // RTTNode is an osg::Node — update traversal never reaches the internal camera
+            // subtree, so CollectLightCallback never fires. We bypass it with PortalLightRefresher,
+            // a cull callback that re-populates mLights and clears the view-space cache every frame.
+            osg::ref_ptr<PortalLightRefresher> refresher = new PortalLightRefresher(lightManager.get());
             if (cellStore)
             {
                 const float maxDistSq = kMaxDist * kMaxDist;
                 for (const auto& ref : cellStore->getReadOnlyLights().mList)
                 {
-                    if (!ref.mBase)
-                        continue;
-                    if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef))
-                        continue;
-
+                    if (!ref.mBase) continue;
+                    if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef)) continue;
                     const ESM::Position& pos = ref.mRef.getPosition();
                     const float dx = pos.pos[0] - destCenter.x();
                     const float dy = pos.pos[1] - destCenter.y();
-                    if (dx * dx + dy * dy > maxDistSq)
-                        continue;
+                    if (dx * dx + dy * dy > maxDistSq) continue;
 
-                    SceneUtil::LightCommon lightCommon(*ref.mBase);
                     osg::ref_ptr<SceneUtil::LightSource> ls
-                        = SceneUtil::createLightSource(lightCommon, Mask_Lighting, false);
-
-                    // Position via PAT so LightSource world transform is correct.
+                        = SceneUtil::createLightSource(SceneUtil::LightCommon(*ref.mBase), Mask_Lighting, false);
                     osg::ref_ptr<osg::PositionAttitudeTransform> pat = new osg::PositionAttitudeTransform;
                     pat->setPosition(pos.asVec3());
                     pat->addChild(ls);
-                    lightManager->addChild(pat);
+                    lightManager->addChild(pat);  // keeps LightSource alive via scene graph
+                    refresher->add(ls, pos.asVec3());
                 }
             }
+            refresher->setStatics(statics.get());
+            // addCullCallback prepends: refresher fires first, then chains to LightManagerCullCallback.
+            lightManager->addCullCallback(refresher);
+
+            // Allow alpha blending on transparent geometry (particles, glass, etc.) in the statics.
+            // FORCE_OPAQUE=1 on the lightManager forces gl_FragData[0].a=1 which makes srcAlpha=1
+            // in the blend formula, rendering particle quads as opaque rectangles. Statics override
+            // it to 0 so NiAlphaProperty blend states work correctly. Opaque geometry is unaffected
+            // since its native alpha is already 1.
+            statics->getOrCreateStateSet()->setDefine("FORCE_OPAQUE", "0", osg::StateAttribute::ON);
+
+            lightManager->addChild(statics);
 
             return lightManager;
         }
