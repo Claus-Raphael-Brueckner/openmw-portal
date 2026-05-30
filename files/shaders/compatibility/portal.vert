@@ -1,10 +1,10 @@
 #version 120
 
 uniform mat4 projectionMatrix;
-varying vec2 v_uv;
+varying vec4 v_clipPos;
 
 void main()
 {
     gl_Position = projectionMatrix * gl_ModelViewMatrix * gl_Vertex;
-    v_uv = gl_MultiTexCoord0.xy;
+    v_clipPos = gl_Position;
 }

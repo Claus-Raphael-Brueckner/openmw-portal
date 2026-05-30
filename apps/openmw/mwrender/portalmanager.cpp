@@ -161,7 +161,32 @@ namespace MWRender
             };
 
             addRefs(cellStore->getReadOnlyStatics().mList);
-            addRefs(cellStore->getReadOnlyDoors().mList);
+            // Skip teleport doors: they are replaced by portal quads in the live scene and
+            // would otherwise appear as physical door meshes blocking the RTT view.
+            for (const auto& ref : cellStore->getReadOnlyDoors().mList)
+            {
+                if (!ref.mBase || ref.mBase->mModel.empty()) continue;
+                if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef)) continue;
+                if (ref.mRef.getTeleport()) continue;  // portal doors: skip
+                const ESM::Position& pos = ref.mRef.getPosition();
+                const float dx = pos.pos[0] - destCenter.x();
+                const float dy = pos.pos[1] - destCenter.y();
+                if (dx * dx + dy * dy > maxDistSq) continue;
+                try
+                {
+                    VFS::Path::Normalized modelPath = Misc::ResourceHelpers::correctMeshPath(
+                        VFS::Path::Normalized(ref.mBase->mModel));
+                    osg::ref_ptr<osg::Node> node = resourceSystem->getSceneManager()->getInstance(modelPath);
+                    const float scale = ref.mRef.getScale();
+                    osg::ref_ptr<osg::PositionAttitudeTransform> pat = new osg::PositionAttitudeTransform;
+                    pat->setPosition(pos.asVec3());
+                    pat->setAttitude(Misc::Convert::makeOsgQuat(pos));
+                    pat->setScale(osg::Vec3f(scale, scale, scale));
+                    pat->addChild(node);
+                    group->addChild(pat);
+                }
+                catch (...) {}
+            }
             addRefs(cellStore->getReadOnlyContainers().mList);
             addRefs(cellStore->getReadOnlyActivators().mList);
             addRefs(cellStore->getReadOnlyLights().mList);  // mesh geometry of torches, candles, etc.
@@ -377,7 +402,7 @@ namespace MWRender
         osg::ref_ptr<osg::MatrixTransform> mt = new osg::MatrixTransform;
         mt->setMatrix(osg::Matrix::rotate(nifRootQuat));
         mt->addChild(geode);
-        mt->setNodeMask(Mask_Object);
+        mt->setNodeMask(Mask_PortalQuad);
 
         return mt;
     }
@@ -492,8 +517,9 @@ namespace MWRender
             osg::ref_ptr<osg::Group> portalScene
                 = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem);
 
-            portal.rttNode = new PortalRTTNode(portalScene.get());
-            portal.rttNode->setAspect(halfExtents.x() / halfExtents.y());
+            const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
+            const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
+            portal.rttNode = new PortalRTTNode(portalScene.get(), screenW, screenH);
             {
                 // Clip plane: keep geometry on the interior (destination) side of the portal plane.
                 // Normal = destFwd = inward (into destination, toward RTT camera). Matches the
@@ -516,6 +542,8 @@ namespace MWRender
             osg::ref_ptr<PortalStateSetUpdater> ssUpdater
                 = new PortalStateSetUpdater(portal.rttNode.get(), portalProgram.get());
             quadNode->addCullCallback(ssUpdater);
+            quadNode->getOrCreateStateSet()->addUniform(
+                new osg::Uniform("screenRes", osg::Vec2f(float(screenW), float(screenH))));
 
             portal.portalScene = portalScene;
         }
@@ -555,7 +583,7 @@ namespace MWRender
             && std::abs(local.z()) < portal.halfExtents.y();
     }
 
-    void PortalManager::update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, bool paused)
+    void PortalManager::update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused)
     {
         if (paused || mPortals.empty())
             return;
@@ -620,91 +648,42 @@ namespace MWRender
 
                 constexpr float kMaxDepth = 800.f;
                 const float lyAbs = std::min(std::abs(ly), kMaxDepth);
-                const float depth = lyAbs;
-                // Camera at equivalent depth, looking BACK toward the portal opening (-forward).
-                // The portal opening is then in front of the camera at distance lyAbs,
-                // the frustum covers it exactly, and the entrance area is fully visible.
-                osg::Vec3f camPos = portal.destDoorPos
+
+                const osg::Vec3f camPos = portal.destDoorPos
                     + forward * lyAbs
                     - right   * local.x()
                     + upVec   * local.z();
 
-                const osg::Vec3f localLook = portal.invRot * playerLook;
-                osg::Vec3f rtcLook = -right * localLook.x() + forward * localLook.y() + upVec * localLook.z();
-                if (rtcLook.length2() > 0.f) rtcLook.normalize();
-                else rtcLook = forward;
-
-                const osg::Vec3f localUp = portal.invRot * playerUp;
-                osg::Vec3f rtcUp = -right * localUp.x() + forward * localUp.y() + upVec * localUp.z();
-                if (rtcUp.length2() > 0.f) rtcUp.normalize();
-                else rtcUp = upVec;
-
-                // --- Debug I/O: nearest portal only → /tmp/portal_0.txt ---
-                // active=0: game keeps writing computed values (default).
-                // active=1: game uses the file's pos/look instead and stops overwriting.
-                if (i == nearestIdx)
-                {
-                    constexpr char kDbgFile[] = "/tmp/portal_0.txt";
-                    // Read every frame so active=1 takes effect before the next write.
-                    {
-                        portal.debugOverride = false;
-                        std::ifstream f(kDbgFile);
-                        if (f.is_open())
-                        {
-                            std::string key;
-                            while (f >> key)
-                            {
-                                if (key == "active") { int v; f >> v; portal.debugOverride = (v != 0); }
-                                else if (key == "pos")  f >> portal.debugPos.x()  >> portal.debugPos.y()  >> portal.debugPos.z();
-                                else if (key == "look") f >> portal.debugLook.x() >> portal.debugLook.y() >> portal.debugLook.z();
-                            }
-                        }
-                    }
-                    if (!portal.debugOverride && mDebugFrame % 15 == 0)
-                    {
-                        const osg::Vec3f srcFwd  = portal.planeNormal;  // fullRot * (0,-1,0)
-                        const osg::Vec3f srcRt   = (portal.invRot.inverse()) * osg::Vec3f(1,0,0);
-                        const osg::Vec3f srcUp   = (portal.invRot.inverse()) * osg::Vec3f(0,0,1);
-                        std::ofstream out(kDbgFile, std::ios::trunc);
-                        if (out.is_open())
-                            out << "active 0\n"
-                                << "pos  " << camPos.x()  << " " << camPos.y()  << " " << camPos.z()  << "\n"
-                                << "look " << rtcLook.x() << " " << rtcLook.y() << " " << rtcLook.z() << "\n"
-                                << "# playerLook " << playerLook.x() << " " << playerLook.y() << " " << playerLook.z() << "\n"
-                                << "# localLook  " << localLook.x()  << " " << localLook.y()  << " " << localLook.z()  << "\n"
-                                << "# destDoorPos " << portal.destDoorPos.x() << " " << portal.destDoorPos.y() << " " << portal.destDoorPos.z() << "\n"
-                                << "# destFwd     " << forward.x()  << " " << forward.y()  << " " << forward.z()  << "\n"
-                                << "# destRight   " << right.x()    << " " << right.y()    << " " << right.z()    << "\n"
-                                << "# destUp      " << upVec.x()    << " " << upVec.y()    << " " << upVec.z()    << "\n"
-                                << "# planePoint  " << portal.planePoint.x()  << " " << portal.planePoint.y()  << " " << portal.planePoint.z()  << "\n"
-                                << "# srcFwd      " << srcFwd.x()   << " " << srcFwd.y()   << " " << srcFwd.z()   << "\n"
-                                << "# srcRight    " << srcRt.x()    << " " << srcRt.y()    << " " << srcRt.z()    << "\n"
-                                << "# srcUp       " << srcUp.x()    << " " << srcUp.y()    << " " << srcUp.z()    << "\n"
-                                << "# playerPos   " << playerPos.x() << " " << playerPos.y() << " " << playerPos.z() << "\n"
-                                << "# depth       " << depth << "\n"
-                                << "# local       " << local.x() << " " << local.y() << " " << local.z() << "\n";
-                    }
-                    if (portal.debugOverride)
-                    {
-                        camPos  = portal.debugPos;
-                        rtcLook = portal.debugLook;
-                        if (rtcLook.length2() > 0.f) rtcLook.normalize();
-                    }
-                }
-
-                const osg::Matrix viewMat = osg::Matrix::lookAt(
+                // RTT camera mirrors the player's lateral look angle through the portal.
+                // Source and destination doors may have opposite local-y conventions, so we
+                // take x/z (lateral) from the transformed player look but force y = -1
+                // (destination convention: local -y = into cave), mirroring how the position
+                // formula uses lyAbs to always displace the camera in the forward direction.
+                const osg::Vec3f srcLocal = portal.invRot * playerLook;
+                osg::Vec3f destLocal(-srcLocal.x(), -1.f, srcLocal.z());
+                destLocal.normalize();
+                const osg::Vec3f rttLook = portal.destDoorRot * destLocal;
+                // Fixed portal up avoids gimbal lock when rttLook approaches world-up.
+                const osg::Vec3f rttUp = upVec;
+                const osg::Matrixd portalView = osg::Matrix::lookAt(
                     osg::Vec3d(camPos),
-                    osg::Vec3d(camPos + rtcLook * 400.f),
-                    osg::Vec3d(rtcUp));
-                portal.rttNode->setViewMatrix(viewMat);
+                    osg::Vec3d(camPos + rttLook * 400.f),
+                    osg::Vec3d(rttUp));
 
+                if (i == nearestIdx && mDebugFrame % 15 == 0)
                 {
-                    constexpr double kNear = 4.0;
-                    const double hw = portal.halfExtents.x();
-                    const double hh = portal.halfExtents.y();
-                    const double d  = depth;
-                    portal.rttNode->setProjectionFrustum(-hw/d*kNear, hw/d*kNear, -hh/d*kNear, hh/d*kNear);
+                    std::ofstream out("/tmp/portal_0.txt", std::ios::trunc);
+                    if (out.is_open())
+                        out << "camPos   " << camPos.x() << " " << camPos.y() << " " << camPos.z() << "\n"
+                            << "# local  " << local.x()  << " " << local.y()  << " " << local.z()  << "\n"
+                            << "# lyAbs  " << lyAbs << "\n"
+                            << "# destDoorPos " << portal.destDoorPos.x() << " " << portal.destDoorPos.y() << " " << portal.destDoorPos.z() << "\n"
+                            << "# destFwd     " << forward.x() << " " << forward.y() << " " << forward.z() << "\n"
+                            << "# playerLook  " << playerLook.x() << " " << playerLook.y() << " " << playerLook.z() << "\n";
                 }
+
+                portal.rttNode->setViewMatrix(portalView);
+                portal.rttNode->setProjectionMatrix(projMatrix);
 
             }
 

@@ -669,9 +669,6 @@ namespace MWRender
             const MWWorld::Ptr& player = mPlayerAnimation->getPtr();
             osg::Vec3f playerPos(player.getRefData().getPosition().asVec3());
 
-            if (mPortalManager)
-                mPortalManager->update(playerPos, mViewer->getCamera()->getViewMatrix(), paused);
-
             float windSpeed = mSky->getBaseWindSpeed();
             mSharedUniformStateUpdater->setWindSpeed(windSpeed);
             mSharedUniformStateUpdater->setPlayerPos(playerPos);
@@ -686,6 +683,17 @@ namespace MWRender
             updateProjectionMatrix();
         }
         mCamera->update(dt, paused);
+        // Force view/projection matrices to reflect current-frame mouse input before portal reads them.
+        // Without this, updateCamera() only runs in updateTraversal() (after portal update → 1 frame stale).
+        mCamera->updateCamera(mViewer->getCamera());
+
+        if (!paused && mPortalManager)
+        {
+            const MWWorld::Ptr& player = mPlayerAnimation->getPtr();
+            osg::Vec3f playerPos(player.getRefData().getPosition().asVec3());
+            mPortalManager->update(playerPos, mViewer->getCamera()->getViewMatrix(),
+                mViewer->getCamera()->getProjectionMatrix(), paused);
+        }
 
         bool isUnderwater = mWater->isUnderwater(mCamera->getPosition());
 

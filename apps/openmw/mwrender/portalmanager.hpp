@@ -43,7 +43,7 @@ namespace MWRender
 
         /// Called every frame. Checks whether the player has crossed any portal plane and
         /// triggers teleportation. Only runs when not paused.
-        void update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, bool paused);
+        void update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused);
 
     private:
         struct Portal
@@ -56,9 +56,6 @@ namespace MWRender
             osg::Vec2f halfExtents;  ///< half-width (X) and half-height (Z) of the opening
             bool lastSide = true;    ///< which side of the plane the player was on last frame
             int cooldown = 0;        ///< frames to wait; prevents immediate re-trigger
-            bool       debugOverride = false;
-            osg::Vec3f debugPos;
-            osg::Vec3f debugLook;
             osg::Vec3f destPoint;    ///< world-space arrival position in the destination cell
             osg::Quat  destRot;      ///< orientation of the arrival point (forward = into dest)
             osg::Vec3f destDoorPos;  ///< world-space center of the actual destination door

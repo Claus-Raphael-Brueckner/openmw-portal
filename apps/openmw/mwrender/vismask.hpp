@@ -59,6 +59,9 @@ namespace MWRender
 
         // Used by portal RTT cameras to render destination cell geometry (Stage 2+)
         Mask_PortalScene = (1 << 21),
+
+        // Set on portal quad nodes — excluded from RTT cull so portals don't appear inside each other
+        Mask_PortalQuad = (1 << 22),
     };
 
     // Defines masks to remove when using ToggleWorld command
