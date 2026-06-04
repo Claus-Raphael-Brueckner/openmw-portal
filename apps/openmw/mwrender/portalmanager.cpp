@@ -767,9 +767,8 @@ namespace MWRender
                 // take x/z (lateral) from the transformed player look but force y = -1
                 // (destination convention: local -y = into cave), mirroring how the position
                 // formula uses lyAbs to always displace the camera in the forward direction.
-                // Portal doors face each other (both use local -y = forward, but opposite world dirs).
-                // Transform: flip x (mirror) + flip y (opposite facing) + keep z.
-                // This is a 180-deg rotation around portal's local Z — the proper door-convention fix.
+                // Both doors use local -y = forward but face opposite world directions.
+                // Flip x (mirror) and y (opposite facing), keep z: 180-deg rotation around portal Z.
                 const osg::Vec3f srcLocal = portal.invRot * playerLook;
                 const osg::Vec3f rttLook = portal.destDoorRot * osg::Vec3f(-srcLocal.x(), -srcLocal.y(), srcLocal.z());
                 // Fixed portal up avoids gimbal lock when rttLook approaches world-up.
