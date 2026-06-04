@@ -30,7 +30,7 @@ void PortalRTTNode::setDefaults(osg::Camera* camera)
 {
     camera->setName("PortalCamera");
     camera->setReferenceFrame(osg::Camera::ABSOLUTE_RF);
-    camera->setClearColor(osg::Vec4f(1.f, 0.f, 1.f, 1.f)); // DEBUG: magenta = RTT bound but scene empty
+    camera->setClearColor(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
     camera->setClearMask(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     camera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
     SceneUtil::setCameraClearDepth(camera);
