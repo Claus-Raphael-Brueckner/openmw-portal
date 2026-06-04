@@ -45,6 +45,9 @@ namespace MWRender
         /// triggers teleportation. Only runs when not paused.
         void update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused);
 
+        /// Provide the main terrain root so exterior portals can share it in their RTT scene.
+        void setExteriorTerrainNode(osg::Group* terrain) { mExteriorTerrainNode = terrain; }
+
     private:
         struct Portal
         {
@@ -71,7 +74,8 @@ namespace MWRender
 
         std::vector<Portal> mPortals;
         Resource::ResourceSystem* mResourceSystem;
-        osg::Group* mRttParent; ///< RTT nodes are added here (should outlive PortalManager)
+        osg::Group* mRttParent;           ///< RTT nodes are added here (should outlive PortalManager)
+        osg::Group* mExteriorTerrainNode = nullptr; ///< shared terrain root for exterior portals
         int mDebugFrame = 0;
     };
 

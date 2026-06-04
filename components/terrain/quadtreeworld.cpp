@@ -525,13 +525,19 @@ namespace Terrain
         mQuadTreeBuilt = true;
     }
 
+    osg::Group* QuadTreeWorld::getQuadTreeRoot()
+    {
+        ensureQuadTreeBuilt();
+        return mRootNode.get();
+    }
+
     void QuadTreeWorld::enable(bool enabled)
     {
         if (enabled)
         {
             ensureQuadTreeBuilt();
 
-            if (!mRootNode->getNumParents())
+            if (mTerrainRoot->getChildIndex(mRootNode) >= mTerrainRoot->getNumChildren())
                 mTerrainRoot->addChild(mRootNode);
         }
         else if (mRootNode)

@@ -48,6 +48,7 @@ void PortalRTTNode::setDefaults(osg::Camera* camera)
 
 void PortalRTTNode::apply(osg::Camera* camera)
 {
+    camera->setClearColor(mClearColor);
     camera->setViewMatrix(mViewMatrix);
     camera->setProjectionMatrix(mProjMatrix);
     camera->setCullMask(Mask_Scene | Mask_Terrain | Mask_Static | Mask_Object | Mask_Lighting | Mask_ParticleSystem);

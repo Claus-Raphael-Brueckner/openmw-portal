@@ -276,7 +276,8 @@ namespace MWRender
         osg::ref_ptr<osg::Group> buildPortalScene(
             MWWorld::CellStore* cellStore,
             const osg::Vec3f& destCenter,
-            Resource::ResourceSystem* resourceSystem)
+            Resource::ResourceSystem* resourceSystem,
+            osg::Group* exteriorTerrainNode)
         {
             constexpr float kMaxDist = 5000.f;
             osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, kMaxDist);
@@ -327,16 +328,21 @@ namespace MWRender
             dummyTex->setShadowCompareFunc(osg::Texture::ShadowCompareFunc::ALWAYS);
             ss->setTextureAttributeAndModes(7, dummyTex, osg::StateAttribute::ON);
 
-            // Directional light using the destination cell's own ambient and directional colours,
-            // matching how RenderingManager::configureAmbient sets up interior cell lighting.
+            // Directional light: use cell mood for interiors; for exterior cells (cave→outside portal)
+            // getMood() returns zeros — use a fixed daytime approximation instead.
             osg::Vec4f ambient(0.3f, 0.3f, 0.3f, 1.f);
             osg::Vec4f diffuse(0.7f, 0.7f, 0.7f, 1.f);
-            if (cellStore)
+            const bool isExterior = cellStore && cellStore->getCell()->isExterior();
+            if (cellStore && !isExterior)
             {
                 const MWWorld::Cell* cell = cellStore->getCell();
                 ambient = SceneUtil::colourFromRGB(cell->getMood().mAmbiantColor);
                 diffuse = SceneUtil::colourFromRGB(cell->getMood().mDirectionalColor);
-
+            }
+            else if (isExterior)
+            {
+                ambient = osg::Vec4f(0.35f, 0.35f, 0.35f, 1.f);
+                diffuse = osg::Vec4f(0.85f, 0.80f, 0.70f, 1.f);  // warm daylight
             }
 
             // Ambient goes on LightModel (matches CharacterPreview pattern and OpenMW shader expectations).
@@ -344,11 +350,13 @@ namespace MWRender
             lightModel->setAmbientIntensity(ambient);
             ss->setAttributeAndModes(lightModel, osg::StateAttribute::ON);
 
-            // Interior sun position matches Morrowind's convention (same as RenderingManager).
-            static const osg::Vec4f interiorSunPos(-1.f, osg::DegreesToRadians(45.f), osg::DegreesToRadians(45.f), 0.f);
+            // Sun direction: interior uses Morrowind's convention; exterior uses a midday approximation.
+            const osg::Vec4f sunPos = isExterior
+                ? osg::Vec4f(0.5f, -0.5f, 1.f, 0.f)
+                : osg::Vec4f(-1.f, osg::DegreesToRadians(45.f), osg::DegreesToRadians(45.f), 0.f);
             osg::ref_ptr<osg::Light> light = new osg::Light;
             light->setLightNum(0);
-            light->setPosition(interiorSunPos);
+            light->setPosition(sunPos);
             light->setAmbient(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
             light->setDiffuse(diffuse);
             light->setSpecular(osg::Vec4f(0.f, 0.f, 0.f, 0.f));
@@ -399,6 +407,14 @@ namespace MWRender
             statics->getOrCreateStateSet()->setDefine("FORCE_OPAQUE", "0", osg::StateAttribute::ON);
 
             lightManager->addChild(statics);
+
+            if (isExterior && exteriorTerrainNode)
+            {
+                // Terrain needs FORCE_OPAQUE=1 (single-attachment RTT has no gl_FragData[1])
+                // and the sun light state. Adding under lightManager provides both via inheritance.
+                // Terrain shaders ignore point-light uniforms so PortalLightRefresher is harmless.
+                lightManager->addChild(exteriorTerrainNode);
+            }
 
             return lightManager;
         }
@@ -623,11 +639,13 @@ namespace MWRender
                 << "," << portal.destDoorPos.z() << ")";
 
             osg::ref_ptr<osg::Group> portalScene
-                = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem);
+                = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode);
 
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
             portal.rttNode = new PortalRTTNode(portalScene.get(), screenW, screenH);
+            if (destCellStore && destCellStore->getCell()->isExterior())
+                portal.rttNode->setClearColor(osg::Vec4f(0.4f, 0.65f, 1.f, 1.f));
             {
                 // Clip plane: keep geometry on the interior (destination) side of the portal plane.
                 // Normal = destFwd = inward (into destination, toward RTT camera). Matches the

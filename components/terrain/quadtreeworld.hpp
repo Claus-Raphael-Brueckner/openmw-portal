@@ -87,6 +87,11 @@ namespace Terrain
         };
         void addChunkManager(ChunkManager*);
 
+        /// Returns the live quadtree root, valid even when the terrain is disabled (enable(false)).
+        /// Callers (e.g. portal RTT) can add this as a child directly to render terrain independently
+        /// of the main enable/disable cycle.
+        osg::Group* getQuadTreeRoot();
+
     private:
         void ensureQuadTreeBuilt();
         void loadRenderingNode(

@@ -110,6 +110,7 @@ namespace Terrain
         osg::Callback* getHeightCullCallback(float highz, unsigned int mask);
 
         void setActiveGrid(const osg::Vec4i& grid) { mActiveGrid = grid; }
+        osg::Group* getTerrainRoot() { return mTerrainRoot.get(); }
 
     protected:
         Storage* mStorage;

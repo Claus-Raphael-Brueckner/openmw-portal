@@ -256,6 +256,11 @@ namespace MWRender
         mTerrain = chunkMgr.mTerrain.get();
         mGroundcover = chunkMgr.mGroundcover.get();
         mObjectPaging = chunkMgr.mObjectPaging.get();
+        // getQuadTreeRoot() returns the live quadtree node, valid even when terrain is disabled
+        // (e.g. player inside a cave). mTerrainRoot becomes empty on enable(false), so using
+        // getTerrainRoot() would give an empty node.
+        if (auto* qtWorld = dynamic_cast<Terrain::QuadTreeWorld*>(mTerrain))
+            mPortalManager->setExteriorTerrainNode(qtWorld->getQuadTreeRoot());
 
         mStateUpdater = new SceneUtil::StateUpdater();
         sceneRoot->addUpdateCallback(mStateUpdater);
