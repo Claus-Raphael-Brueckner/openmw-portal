@@ -134,6 +134,14 @@ namespace MWPhysics
         }
     }
 
+    void Actor::setGhostMode(bool ghost)
+    {
+        if (ghost)
+            addCollisionMask(CollisionType_HeightMap | CollisionType_PortalGuide);
+        else
+            addCollisionMask(getCollisionMask());
+    }
+
     void Actor::addCollisionMask(int collisionMask)
     {
         mTaskScheduler->addCollisionObject(mCollisionObject.get(), CollisionType_Actor, collisionMask);

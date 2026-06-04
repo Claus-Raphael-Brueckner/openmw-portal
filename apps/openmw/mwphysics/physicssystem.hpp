@@ -195,6 +195,16 @@ namespace MWPhysics
 
         bool toggleCollisionMode();
 
+        /// Make the player pass through CollisionType_World geometry (rocks, interior walls)
+        /// while still landing on the heightmap and a portal guide floor.
+        /// Call with ghost=false to restore the normal collision mask.
+        void setPlayerGhostMode(bool ghost);
+
+        /// Add/remove a thin floor box below a portal door so the player doesn't fall
+        /// through the interior floor when ghost mode strips CollisionType_World.
+        void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth);
+        void removePortalFloor();
+
         /// Determine new position based on all queued movements, then clear the list.
         void stepSimulation(
             float dt, bool skipSimulation, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats);
@@ -327,6 +337,9 @@ namespace MWPhysics
 
         std::unique_ptr<btCollisionObject> mWaterCollisionObject;
         std::unique_ptr<btCollisionShape> mWaterCollisionShape;
+
+        std::unique_ptr<btCollisionObject> mPortalFloorObject;
+        std::unique_ptr<btCollisionShape> mPortalFloorShape;
 
         std::unique_ptr<MWRender::DebugDrawer> mDebugDrawer;
 

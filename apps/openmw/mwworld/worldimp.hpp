@@ -404,6 +404,9 @@ namespace MWWorld
         bool isActorCollisionEnabled(const Ptr& ptr) override;
 
         bool toggleCollisionMode() override;
+        void setPlayerGhostMode(bool ghost) override;
+        void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth) override;
+        void removePortalFloor() override;
         ///< Toggle collision mode for player. If disabled player object should ignore
         /// collisions and gravity.
         ///< \return Resulting mode

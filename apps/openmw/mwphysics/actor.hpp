@@ -50,6 +50,11 @@ namespace MWPhysics
          */
         void enableCollisionBody(bool collision);
 
+        /// Strip CollisionType_World from the broadphase mask (ghost=true) so the actor passes
+        /// through static geometry, while still landing on HeightMap and PortalGuide objects.
+        /// Pass ghost=false to restore the full collision mask.
+        void setGhostMode(bool ghost);
+
         void updateScale();
         void setRotation(osg::Quat quat);
 

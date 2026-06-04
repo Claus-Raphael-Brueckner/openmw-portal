@@ -322,6 +322,9 @@ namespace MWBase
         virtual bool isActorCollisionEnabled(const MWWorld::Ptr& ptr) = 0;
 
         virtual bool toggleCollisionMode() = 0;
+        virtual void setPlayerGhostMode(bool ghost) = 0;
+        virtual void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth) = 0;
+        virtual void removePortalFloor() = 0;
         ///< Toggle collision mode for player. If disabled player object should ignore
         /// collisions and gravity.
         /// \return Resulting mode

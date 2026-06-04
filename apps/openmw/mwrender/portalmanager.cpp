@@ -554,6 +554,20 @@ namespace MWRender
         if (!isPortalDoor(door))
             return false;
 
+        // Only create portals for genuine exterior↔interior transitions.
+        // ex_cave_door_01 / in_cave_door_01 can also appear as interior→interior connectors
+        // (deeper cave rooms). Those must not become portals — their destCell is the same
+        // cell type as the source cell.
+        {
+            const ESM::RefId& destId = door.getCellRef().getDestCell();
+            const MWWorld::CellStore* destStore
+                = MWBase::Environment::get().getWorld()->findCellStore(destId);
+            if (!destStore)
+                return false;
+            if (door.getCell()->getCell()->isExterior() == destStore->getCell()->isExterior())
+                return false;
+        }
+
         osg::Group* baseNode = door.getRefData().getBaseNode();
         if (!baseNode)
             return false;
@@ -596,7 +610,11 @@ namespace MWRender
         portal.invRot      = fullRot.inverse();
         portal.halfExtents = halfExtents;
         portal.lastSide    = (initialDist >= 0.f);
-        portal.cooldown    = 0;
+        // tryCreatePortal runs during loadCell, before changePlayerCell sets the arrival position.
+        // lastSide is therefore initialized from the old cell's player position and may be wrong.
+        // The cooldown lets the player arrive so eyePos-based lastSide can stabilize before the
+        // trigger is armed. 30 frames ≈ 0.5 s at 60 fps is enough for the cell transition to settle.
+        portal.cooldown    = 30;
 
         // --- Stage 2: build RTT portal scene ---
         // Wrapped in try-catch: if shader loading or cell loading fails, the portal still works
@@ -848,9 +866,44 @@ namespace MWRender
             const float dist = (eyePos - portal.planePoint) * portal.planeNormal;
             const bool side = (dist >= 0.f);
 
+            // --- Approach ghost mode ---
+            // When the player is within the approach zone (positive side, within bounds) but
+            // hasn't crossed yet, strip CollisionType_World from the player's collision mask
+            // so cave-entrance rocks no longer block the path. A portal-guide floor box keeps
+            // the player from falling through the interior floor while World collision is gone.
+            constexpr float kApproachDist = 180.f;
+            const bool inApproachZone = portal.lastSide && dist >= 0.f && dist < kApproachDist
+                && isWithinBounds(eyePos, portal);
+
+            if (inApproachZone && !portal.approachActive)
+            {
+                portal.approachActive = true;
+                MWBase::World* world = MWBase::Environment::get().getWorld();
+                world->setPlayerGhostMode(true);
+                // Floor box: 300×300, 10 units thick, placed 5 units below the door base.
+                const float floorZ = portal.planePoint.z() - portal.halfExtents.y() - 5.f;
+                const osg::Vec3f floorCenter(portal.planePoint.x(), portal.planePoint.y(), floorZ);
+                world->addPortalFloor(floorCenter, 150.f, 150.f);
+            }
+            else if (!inApproachZone && portal.approachActive)
+            {
+                portal.approachActive = false;
+                MWBase::World* world = MWBase::Environment::get().getWorld();
+                world->setPlayerGhostMode(false);
+                world->removePortalFloor();
+            }
+
             // Trigger only when crossing from outside (lastSide=true) to inside.
             if (portal.lastSide && !side && isWithinBounds(eyePos, portal))
             {
+                // Clean up ghost mode before the cell change destroys this portal.
+                if (portal.approachActive)
+                {
+                    portal.approachActive = false;
+                    MWBase::World* world = MWBase::Environment::get().getWorld();
+                    world->setPlayerGhostMode(false);
+                    world->removePortalFloor();
+                }
                 const ESM::RefId destCell = portal.door.getCellRef().getDestCell();
                 const ESM::Position destPos = portal.door.getCellRef().getDoorDest();
                 // changeToCell is synchronous; may call destroyPortal invalidating mPortals.

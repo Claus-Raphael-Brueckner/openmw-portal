@@ -1539,6 +1539,21 @@ namespace MWWorld
         return false;
     }
 
+    void World::setPlayerGhostMode(bool ghost)
+    {
+        mPhysics->setPlayerGhostMode(ghost);
+    }
+
+    void World::addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth)
+    {
+        mPhysics->addPortalFloor(center, halfWidth, halfDepth);
+    }
+
+    void World::removePortalFloor()
+    {
+        mPhysics->removePortalFloor();
+    }
+
     bool World::toggleRenderMode(MWRender::RenderMode mode)
     {
         switch (mode)

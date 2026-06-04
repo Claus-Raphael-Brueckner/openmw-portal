@@ -77,6 +77,7 @@ namespace MWRender
             osg::ref_ptr<PortalRTTNode> rttNode;    ///< RTT camera node, child of mRttParent
             osg::ref_ptr<osg::Group>   portalScene; ///< scene group rendered by the RTT camera
             bool destIsExterior = false;
+            bool approachActive = false; ///< ghost mode currently active for this portal
         };
 
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door) const;

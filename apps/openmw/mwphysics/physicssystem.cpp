@@ -15,6 +15,7 @@
 #include <BulletCollision/CollisionShapes/btConeShape.h>
 #include <BulletCollision/CollisionShapes/btSphereShape.h>
 #include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
+#include <BulletCollision/CollisionShapes/btBoxShape.h>
 
 #include <LinearMath/btQuickprof.h>
 #include <LinearMath/btVector3.h>
@@ -608,6 +609,39 @@ namespace MWPhysics
         auto* projectile = foundProjectile->second.get();
 
         projectile->setCaster(caster);
+    }
+
+    void PhysicsSystem::setPlayerGhostMode(bool ghost)
+    {
+        ActorMap::iterator found = mActors.find(MWMechanics::getPlayer().mRef);
+        if (found != mActors.end())
+            found->second->setGhostMode(ghost);
+    }
+
+    void PhysicsSystem::addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth)
+    {
+        removePortalFloor();
+        mPortalFloorShape = std::make_unique<btBoxShape>(btVector3(halfWidth, halfDepth, 10.f));
+        mPortalFloorObject = std::make_unique<btCollisionObject>();
+        mPortalFloorObject->setCollisionShape(mPortalFloorShape.get());
+        btTransform tr;
+        tr.setIdentity();
+        tr.setOrigin(btVector3(center.x(), center.y(), center.z()));
+        mPortalFloorObject->setWorldTransform(tr);
+        // CollisionType_PortalGuide: included in the player's ghost-mode mask so the player
+        // still lands on this box when CollisionType_World (interior floor) is stripped.
+        mTaskScheduler->addCollisionObject(
+            mPortalFloorObject.get(), CollisionType_PortalGuide, CollisionType_Actor);
+    }
+
+    void PhysicsSystem::removePortalFloor()
+    {
+        if (mPortalFloorObject)
+        {
+            mTaskScheduler->removeCollisionObject(mPortalFloorObject.get());
+            mPortalFloorObject.reset();
+            mPortalFloorShape.reset();
+        }
     }
 
     bool PhysicsSystem::toggleCollisionMode()
