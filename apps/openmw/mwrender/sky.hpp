@@ -105,6 +105,10 @@ namespace MWRender
 
         osg::Vec4f getSkyColor() const { return mSkyColour; }
 
+        /// Returns the sky visual node (geometry only, no nested SkyRTT camera).
+        /// Wrap in a CameraRelativeTransform before adding to an RTT scene.
+        osg::Group* getSkyNode() { return mSkyNode.get(); }
+
     private:
         void create();
         ///< no need to call this, automatically done on first enable()

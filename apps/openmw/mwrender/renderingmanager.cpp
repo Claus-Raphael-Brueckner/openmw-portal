@@ -261,6 +261,7 @@ namespace MWRender
         // getTerrainRoot() would give an empty node.
         if (auto* qtWorld = dynamic_cast<Terrain::QuadTreeWorld*>(mTerrain))
             mPortalManager->setExteriorTerrainNode(qtWorld->getQuadTreeRoot());
+        // Sky node set lazily via setSkyManager — mSky not yet constructed here.
 
         mStateUpdater = new SceneUtil::StateUpdater();
         sceneRoot->addUpdateCallback(mStateUpdater);
@@ -319,6 +320,7 @@ namespace MWRender
 
         mSky = std::make_unique<SkyManager>(
             sceneRoot, mRootNode, mViewer->getCamera(), resourceSystem->getSceneManager(), mSkyBlending);
+        mPortalManager->setSkyManager(mSky.get());
         if (mSkyBlending)
         {
             int skyTextureUnit = mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
@@ -694,6 +696,7 @@ namespace MWRender
 
         if (!paused && mPortalManager)
         {
+            mPortalManager->setExteriorSkyColor(mSky->getSkyColor());
             const MWWorld::Ptr& player = mPlayerAnimation->getPtr();
             osg::Vec3f playerPos(player.getRefData().getPosition().asVec3());
             mPortalManager->update(playerPos, mViewer->getCamera()->getViewMatrix(),

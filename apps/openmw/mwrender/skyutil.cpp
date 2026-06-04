@@ -376,6 +376,13 @@ namespace MWRender
         void operator()(osg::Node* node, osgUtil::CullVisitor* cv)
         {
             // XXX have to remove unwanted culling plane of the water reflection camera
+            // If the projection cull stack is empty (e.g. portal RTT camera), there are no
+            // extra planes to remove — just traverse normally.
+            if (cv->getProjectionCullingStack().empty())
+            {
+                traverse(node, cv);
+                return;
+            }
 
             // Remove all planes that aren't from the standard frustum
             unsigned int numPlanes = 4;

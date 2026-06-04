@@ -6,6 +6,7 @@
 #include <osg/Quat>
 #include <osg/Vec2f>
 #include <osg/Vec3f>
+#include <osg/Vec4f>
 #include <osg/ref_ptr>
 
 #include "../mwworld/ptr.hpp"
@@ -24,6 +25,7 @@ namespace Resource
 namespace MWRender
 {
     class PortalRTTNode;
+    class SkyManager;
 
     /// Manages portal surfaces that replace teleport door meshes.
     /// Stage 1: ex_cave_door_01 replaced by colored quad; walk-through triggers teleport.
@@ -48,6 +50,12 @@ namespace MWRender
         /// Provide the main terrain root so exterior portals can share it in their RTT scene.
         void setExteriorTerrainNode(osg::Group* terrain) { mExteriorTerrainNode = terrain; }
 
+        /// Update the sky clear color for exterior portal RTTs (call each frame with current sky color).
+        void setExteriorSkyColor(const osg::Vec4f& color) { mExteriorSkyColor = color; }
+
+        /// Provide the SkyManager so exterior portals can fetch mSkyNode lazily (after sky is created).
+        void setSkyManager(SkyManager* sky) { mSkyManager = sky; }
+
     private:
         struct Portal
         {
@@ -65,6 +73,7 @@ namespace MWRender
             osg::Quat  destDoorRot;  ///< full rotation of the destination door (CellRef * NIF root)
             osg::ref_ptr<PortalRTTNode> rttNode;    ///< RTT camera node, child of mRttParent
             osg::ref_ptr<osg::Group>   portalScene; ///< scene group rendered by the RTT camera
+            bool destIsExterior = false;
         };
 
         bool isPortalDoor(const MWWorld::Ptr& door) const;
@@ -76,6 +85,8 @@ namespace MWRender
         Resource::ResourceSystem* mResourceSystem;
         osg::Group* mRttParent;           ///< RTT nodes are added here (should outlive PortalManager)
         osg::Group* mExteriorTerrainNode = nullptr; ///< shared terrain root for exterior portals
+        SkyManager* mSkyManager         = nullptr; ///< for lazy getSkyNode() in buildPortalScene
+        osg::Vec4f  mExteriorSkyColor   = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f);
         int mDebugFrame = 0;
     };
 

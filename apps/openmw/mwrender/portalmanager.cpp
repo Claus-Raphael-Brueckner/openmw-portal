@@ -1,4 +1,6 @@
 #include "portalmanager.hpp"
+#include "sky.hpp"
+#include "skyutil.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -277,7 +279,8 @@ namespace MWRender
             MWWorld::CellStore* cellStore,
             const osg::Vec3f& destCenter,
             Resource::ResourceSystem* resourceSystem,
-            osg::Group* exteriorTerrainNode)
+            osg::Group* exteriorTerrainNode,
+            SkyManager* skyManager)
         {
             constexpr float kMaxDist = 5000.f;
             osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, kMaxDist);
@@ -408,12 +411,25 @@ namespace MWRender
 
             lightManager->addChild(statics);
 
-            if (isExterior && exteriorTerrainNode)
+            if (isExterior)
             {
-                // Terrain needs FORCE_OPAQUE=1 (single-attachment RTT has no gl_FragData[1])
-                // and the sun light state. Adding under lightManager provides both via inheritance.
-                // Terrain shaders ignore point-light uniforms so PortalLightRefresher is harmless.
-                lightManager->addChild(exteriorTerrainNode);
+                if (exteriorTerrainNode)
+                    lightManager->addChild(exteriorTerrainNode);
+
+                // Fetch mSkyNode lazily — sky is created after RenderingManager construction.
+                // Wrap in a new CameraRelativeTransform (excludes mSkyRTT which crashes with a
+                // second camera). Cull mask includes Mask_Sky but NOT Mask_Sun so the Sun's
+                // occlusion queries are culled and don't crash the portal RTT camera.
+                osg::Group* skyNode = skyManager ? skyManager->getSkyNode() : nullptr;
+                if (skyNode)
+                {
+                    osg::ref_ptr<CameraRelativeTransform> skyWrapper = new CameraRelativeTransform;
+                    skyWrapper->addChild(skyNode);
+                    osg::ref_ptr<osg::Group> root = new osg::Group;
+                    root->addChild(lightManager);
+                    root->addChild(skyWrapper);
+                    return root;
+                }
             }
 
             return lightManager;
@@ -639,13 +655,14 @@ namespace MWRender
                 << "," << portal.destDoorPos.z() << ")";
 
             osg::ref_ptr<osg::Group> portalScene
-                = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode);
+                = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode, mSkyManager);
 
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
             portal.rttNode = new PortalRTTNode(portalScene.get(), screenW, screenH);
-            if (destCellStore && destCellStore->getCell()->isExterior())
-                portal.rttNode->setClearColor(osg::Vec4f(0.4f, 0.65f, 1.f, 1.f));
+            portal.destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
+            if (portal.destIsExterior)
+                portal.rttNode->setClearColor(mExteriorSkyColor);
             {
                 // Clip plane: keep geometry on the interior (destination) side of the portal plane.
                 // Normal = destFwd = inward (into destination, toward RTT camera). Matches the
@@ -714,6 +731,10 @@ namespace MWRender
         if (paused || mPortals.empty())
             return;
 
+        for (auto& portal : mPortals)
+            if (portal.destIsExterior && portal.rttNode)
+                portal.rttNode->setClearColor(mExteriorSkyColor);
+
         // Extract eye position, look, and up from the view matrix.
         // Eye position: view matrix M transforms world→eye. Camera origin = -R^T * t
         // where t = (M(3,0), M(3,1), M(3,2)) is the translation row.
@@ -772,8 +793,7 @@ namespace MWRender
                 const osg::Vec3f right   = portal.destDoorRot * osg::Vec3f(1.f,  0.f, 0.f);
                 const osg::Vec3f upVec   = portal.destDoorRot * osg::Vec3f(0.f,  0.f, 1.f);
 
-                constexpr float kMaxDepth = 800.f;
-                const float lyAbs = std::min(std::abs(ly), kMaxDepth);
+                const float lyAbs = std::abs(ly);
 
                 const osg::Vec3f camPos = portal.destDoorPos
                     - forward * lyAbs
