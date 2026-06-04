@@ -163,6 +163,9 @@ namespace MWRender
 
         void removeObject(const MWWorld::Ptr& ptr);
 
+        /// Returns true if ptr is a portal door (physics should not be added for it).
+        bool isPortalDoor(const MWWorld::Ptr& ptr) const;
+
         void setWaterEnabled(bool enabled);
         void setWaterHeight(float level);
 

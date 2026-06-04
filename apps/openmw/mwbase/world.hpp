@@ -250,10 +250,11 @@ namespace MWBase
         ///< Move to interior cell.
         ///< @param changeEvent If false, do not trigger cell change flag or detect worldspace changes
 
-        virtual void changeToCell(
-            const ESM::RefId& cellId, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent = true)
+        virtual void changeToCell(const ESM::RefId& cellId, const ESM::Position& position, bool adjustPlayerPos,
+            bool changeEvent = true, bool suppressFade = false)
             = 0;
         ///< @param changeEvent If false, do not trigger cell change flag or detect worldspace changes
+        ///< @param suppressFade If true, skip fade-out/in and hold the last frame during loading.
 
         virtual MWWorld::Ptr getFocusObject() = 0;
         ///< Return pointer to the object the player is looking at, if it is within activation range

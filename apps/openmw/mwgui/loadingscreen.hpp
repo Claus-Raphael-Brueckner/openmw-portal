@@ -48,6 +48,9 @@ namespace MWGui
 
         double getTargetFrameRate() const;
 
+        /// Call before ScopedLoad to show the last rendered frame as background instead of fading to black.
+        void skipInitialDelay();
+
     private:
         void findSplashScreens();
         bool needToDrawLoadingScreen();
@@ -71,6 +74,7 @@ namespace MWGui
         size_t mProgress;
 
         bool mShowWallpaper;
+        float mInitialDelay = 0.05f;
         double mOldIcoMin = 0.0;
         unsigned int mOldIcoMax = 0;
 

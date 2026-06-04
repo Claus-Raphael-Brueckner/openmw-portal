@@ -56,6 +56,9 @@ namespace MWRender
         /// Provide the SkyManager so exterior portals can fetch mSkyNode lazily (after sky is created).
         void setSkyManager(SkyManager* sky) { mSkyManager = sky; }
 
+        /// Returns true if ptr is a door whose model is handled as a portal surface.
+        bool isPortalDoor(const MWWorld::Ptr& door) const;
+
     private:
         struct Portal
         {
@@ -76,7 +79,6 @@ namespace MWRender
             bool destIsExterior = false;
         };
 
-        bool isPortalDoor(const MWWorld::Ptr& door) const;
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door) const;
         osg::ref_ptr<osg::MatrixTransform> buildQuadNode(const osg::Vec2f& halfExtents, const osg::Quat& nifRootQuat) const;
         bool isWithinBounds(const osg::Vec3f& playerPos, const Portal& portal) const;

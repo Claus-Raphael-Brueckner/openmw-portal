@@ -343,7 +343,7 @@ namespace MWWorld
         ///< @param changeEvent If false, do not trigger cell change flag or detect worldspace changes
 
         void changeToCell(const ESM::RefId& cellId, const ESM::Position& position, bool adjustPlayerPos,
-            bool changeEvent = true) override;
+            bool changeEvent = true, bool suppressFade = false) override;
         ///< @param changeEvent If false, do not trigger cell change flag or detect worldspace changes
 
         MWWorld::Ptr getFocusObject() override;

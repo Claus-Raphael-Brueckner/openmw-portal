@@ -1916,6 +1916,11 @@ namespace MWGui
         return mLoadingScreen;
     }
 
+    void WindowManager::skipLoadingScreenDelay()
+    {
+        mLoadingScreen->skipInitialDelay();
+    }
+
     bool WindowManager::getCursorVisible()
     {
         return mCursorVisible && mCursorActive;

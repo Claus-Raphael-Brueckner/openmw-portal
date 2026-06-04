@@ -135,7 +135,7 @@ namespace
         // Restore effect particles
         world.applyLoopingParticles(ptr);
 
-        if (!model.empty())
+        if (!model.empty() && !(ptr.getClass().isDoor() && rendering.isPortalDoor(ptr)))
             ptr.getClass().insertObject(ptr, model, rotation, physics);
 
         MWBase::Environment::get().getLuaManager()->objectAddedToScene(ptr);
@@ -928,11 +928,13 @@ namespace MWWorld
     }
 
     void Scene::changeToInteriorCell(
-        std::string_view cellName, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent)
+        std::string_view cellName, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent, bool suppressFade)
     {
         CellStore& cell = mWorld.getWorldModel().getInterior(cellName);
-        bool useFading = (mCurrentCell != nullptr);
-        if (useFading)
+        bool useFading = (mCurrentCell != nullptr) && !suppressFade;
+        if (suppressFade)
+            MWBase::Environment::get().getWindowManager()->skipLoadingScreenDelay();
+        else if (useFading)
             MWBase::Environment::get().getWindowManager()->fadeScreenOut(0.5);
 
         Loading::Listener* loadingListener = MWBase::Environment::get().getWindowManager()->getLoadingScreen();
@@ -995,10 +997,11 @@ namespace MWWorld
     }
 
     void Scene::changeToExteriorCell(
-        const ESM::RefId& extCellId, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent)
+        const ESM::RefId& extCellId, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent, bool suppressFade)
     {
-
-        if (changeEvent)
+        if (suppressFade)
+            MWBase::Environment::get().getWindowManager()->skipLoadingScreenDelay();
+        else if (changeEvent)
             MWBase::Environment::get().getWindowManager()->fadeScreenOut(0.5);
         CellStore& current = mWorld.getWorldModel().getCell(extCellId);
 
@@ -1009,7 +1012,7 @@ namespace MWWorld
 
         changePlayerCell(current, position, adjustPlayerPos);
 
-        if (changeEvent)
+        if (!suppressFade && changeEvent)
             MWBase::Environment::get().getWindowManager()->fadeScreenIn(0.5);
 
         MWBase::Environment::get().getWorld()->getPostProcessor()->setExteriorFlag(true);

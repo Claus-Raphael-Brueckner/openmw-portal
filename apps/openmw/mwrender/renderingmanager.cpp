@@ -774,6 +774,11 @@ namespace MWRender
         mWater->removeEmitter(ptr);
     }
 
+    bool RenderingManager::isPortalDoor(const MWWorld::Ptr& ptr) const
+    {
+        return mPortalManager && mPortalManager->isPortalDoor(ptr);
+    }
+
     void RenderingManager::setWaterEnabled(bool enabled)
     {
         mWater->setEnabled(enabled);

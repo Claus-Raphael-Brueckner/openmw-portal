@@ -722,8 +722,10 @@ namespace MWRender
         osg::Vec3f diff = playerPos - portal.planePoint;
         osg::Vec3f local = portal.invRot * diff;
         // local.x = right, local.y = depth along normal, local.z = up
-        return std::abs(local.x()) < portal.halfExtents.x()
-            && std::abs(local.z()) < portal.halfExtents.y();
+        // Small margin so the player doesn't need to hit the exact edge of the opening.
+        const float kMargin = 20.f;
+        return std::abs(local.x()) < portal.halfExtents.x() + kMargin
+            && std::abs(local.z()) < portal.halfExtents.y() + kMargin;
     }
 
     void PortalManager::update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused)
@@ -836,21 +838,23 @@ namespace MWRender
             if (portal.cooldown > 0)
             {
                 --portal.cooldown;
-                const float d = (playerPos - portal.planePoint) * portal.planeNormal;
+                const float d = (eyePos - portal.planePoint) * portal.planeNormal;
                 portal.lastSide = (d >= 0.f);
                 continue;
             }
 
-            const float dist = (playerPos - portal.planePoint) * portal.planeNormal;
+            // Use camera (eye) position for crossing so the trigger fires when the player's
+            // view crosses the plane — the natural "walked through" moment.
+            const float dist = (eyePos - portal.planePoint) * portal.planeNormal;
             const bool side = (dist >= 0.f);
 
             // Trigger only when crossing from outside (lastSide=true) to inside.
-            if (portal.lastSide && !side && isWithinBounds(playerPos, portal))
+            if (portal.lastSide && !side && isWithinBounds(eyePos, portal))
             {
                 const ESM::RefId destCell = portal.door.getCellRef().getDestCell();
                 const ESM::Position destPos = portal.door.getCellRef().getDoorDest();
                 // changeToCell is synchronous; may call destroyPortal invalidating mPortals.
-                MWBase::Environment::get().getWorld()->changeToCell(destCell, destPos, true);
+                MWBase::Environment::get().getWorld()->changeToCell(destCell, destPos, true, true, true);
                 return;
             }
 

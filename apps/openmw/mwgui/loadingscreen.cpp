@@ -172,10 +172,16 @@ namespace MWGui
         MWBase::Environment::get().getWindowManager()->pushGuiMode(mShowWallpaper ? GM_LoadingWallpaper : GM_Loading);
     }
 
+    void LoadingScreen::skipInitialDelay()
+    {
+        mInitialDelay = 0.f;
+    }
+
     void LoadingScreen::loadingOff()
     {
         if (--mNestedLoadingCount > 0)
             return;
+        mInitialDelay = 0.05f;
 
         if (mLastRenderTime < mLoadingOnTime)
         {
@@ -259,9 +265,6 @@ namespace MWGui
         if (mTimer.time_m() <= mLastRenderTime + (1.0 / getTargetFrameRate()) * 1000.0)
             return false;
 
-        // the minimal delay before a loading screen shows
-        constexpr float initialDelay = 0.05f;
-
         bool alreadyShown = (mLastRenderTime > mLoadingOnTime);
         double diff = (mTimer.time_m() - mLoadingOnTime);
 
@@ -272,7 +275,7 @@ namespace MWGui
             diff -= mProgress / static_cast<float>(mProgressBar->getScrollRange()) * 100.f;
         }
 
-        if (!mShowWallpaper && diff < initialDelay * 1000)
+        if (!mShowWallpaper && diff < mInitialDelay * 1000)
             return false;
         return true;
     }

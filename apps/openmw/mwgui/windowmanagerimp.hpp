@@ -140,6 +140,7 @@ namespace MWGui
         void initUI();
 
         Loading::Listener* getLoadingScreen() override;
+        void skipLoadingScreenDelay() override;
 
         /// @note This method will block until the video finishes playing
         /// (and will continually update the window while doing so)

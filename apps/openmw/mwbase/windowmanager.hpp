@@ -303,6 +303,10 @@ namespace MWBase
 
         virtual Loading::Listener* getLoadingScreen() = 0;
 
+        /// Skip the normal delay before the loading screen background appears.
+        /// Call before ScopedLoad to capture the last rendered frame as loading background.
+        virtual void skipLoadingScreenDelay() = 0;
+
         /// Should the cursor be visible?
         virtual bool getCursorVisible() = 0;
 

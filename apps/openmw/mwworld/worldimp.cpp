@@ -857,7 +857,7 @@ namespace MWWorld
     }
 
     void World::changeToCell(
-        const ESM::RefId& cellId, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent)
+        const ESM::RefId& cellId, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent, bool suppressFade)
     {
         const MWWorld::Cell* destinationCell = getWorldModel().getCell(cellId).getCell();
         bool exteriorCell = destinationCell->isExterior();
@@ -874,9 +874,9 @@ namespace MWWorld
         }
         removeContainerScripts(getPlayerPtr());
         if (exteriorCell)
-            mWorldScene->changeToExteriorCell(cellId, position, adjustPlayerPos, changeEvent);
+            mWorldScene->changeToExteriorCell(cellId, position, adjustPlayerPos, changeEvent, suppressFade);
         else
-            mWorldScene->changeToInteriorCell(destinationCell->getNameId(), position, adjustPlayerPos, changeEvent);
+            mWorldScene->changeToInteriorCell(destinationCell->getNameId(), position, adjustPlayerPos, changeEvent, suppressFade);
         addContainerScripts(getPlayerPtr(), getPlayerPtr().getCell());
     }
 

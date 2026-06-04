@@ -163,15 +163,17 @@ namespace MWWorld
 
         void resetCellLoaded() { mCellLoaded = false; }
 
-        void changeToInteriorCell(
-            std::string_view cellName, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent = true);
+        void changeToInteriorCell(std::string_view cellName, const ESM::Position& position, bool adjustPlayerPos,
+            bool changeEvent = true, bool suppressFade = false);
         ///< Move to interior cell.
         /// @param changeEvent Set cellChanged flag?
+        /// @param suppressFade Skip fade-out/in; capture last rendered frame as loading background.
 
-        void changeToExteriorCell(
-            const ESM::RefId& extCellId, const ESM::Position& position, bool adjustPlayerPos, bool changeEvent = true);
+        void changeToExteriorCell(const ESM::RefId& extCellId, const ESM::Position& position, bool adjustPlayerPos,
+            bool changeEvent = true, bool suppressFade = false);
         ///< Move to exterior cell.
         /// @param changeEvent Set cellChanged flag?
+        /// @param suppressFade Skip fade-out/in; capture last rendered frame as loading background.
 
         void clear();
         ///< Change into a void
