@@ -434,6 +434,26 @@ namespace MWRender
 
             return lightManager;
         }
+
+        // Traverses a node tree and resets the mLightManager cache on every LightListCallback.
+        // Required when a shared node (e.g. mExteriorTerrainNode) is removed from a portal's
+        // LightManager: the callbacks still hold a raw pointer to the now-destroyed LightManager,
+        // causing a null/dangling dereference on the next cull. Resetting to nullptr forces them
+        // to re-discover the correct LightManager from the nodepath on the next traversal.
+        class ResetLightManagerVisitor : public osg::NodeVisitor
+        {
+        public:
+            ResetLightManagerVisitor()
+                : osg::NodeVisitor(osg::NodeVisitor::TRAVERSE_ALL_CHILDREN) {}
+
+            void apply(osg::Node& node) override
+            {
+                for (osg::Callback* cb = node.getCullCallback(); cb; cb = cb->getNestedCallback())
+                    if (auto* llc = dynamic_cast<SceneUtil::LightListCallback*>(cb))
+                        llc->resetLightManager();
+                traverse(node);
+            }
+        };
     }
 
     PortalManager::PortalManager(Resource::ResourceSystem* resourceSystem, osg::Group* rttParent)
@@ -727,6 +747,19 @@ namespace MWRender
             [&door](const Portal& p) { return p.door.mRef == door.mRef; });
         if (it != mPortals.end())
         {
+            // Do NOT call physics cleanup here — destroyPortal runs during cell unloading
+            // while physics state is in flux; calling setCollisionFilterMask then crashes.
+            // mGhostModeActive stays true so update() cleans up on the next stable frame.
+
+            // Reset LightListCallback caches on the shared exterior terrain BEFORE the portal
+            // LightManager is freed. The terrain's LightListCallbacks cache a raw mLightManager
+            // pointer; if that pointer becomes dangling the next cull crashes with a null light.
+            if (it->destIsExterior && mExteriorTerrainNode)
+            {
+                ResetLightManagerVisitor resetVisitor;
+                mExteriorTerrainNode->accept(resetVisitor);
+            }
+
             if (it->rttNode && mRttParent)
                 mRttParent->removeChild(it->rttNode);
             mPortals.erase(it);
@@ -748,6 +781,22 @@ namespace MWRender
 
     void PortalManager::update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused)
     {
+        // Watchdog: if ghost mode is active but no portal claims it (e.g. the portal was
+        // destroyed during cell unloading), clean up here in a stable physics state.
+        if (mGhostModeActive)
+        {
+            const bool anyActive = std::any_of(mPortals.begin(), mPortals.end(),
+                [](const Portal& p) { return p.approachActive; });
+            if (!anyActive)
+            {
+                mGhostModeActive = false;
+                MWBase::World* world = MWBase::Environment::get().getWorld();
+                world->setPlayerGhostMode(false);
+                world->removePortalFloor();
+                world->removePortalGuideWalls();
+            }
+        }
+
         if (paused || mPortals.empty())
             return;
 
@@ -878,6 +927,7 @@ namespace MWRender
             if (inApproachZone && !portal.approachActive)
             {
                 portal.approachActive = true;
+                mGhostModeActive = true;
                 MWBase::World* world = MWBase::Environment::get().getWorld();
                 world->setPlayerGhostMode(true);
                 // Floor box: 300×300, 10 units thick, placed 5 units below the door base.
@@ -891,6 +941,7 @@ namespace MWRender
             else if (!inApproachZone && portal.approachActive)
             {
                 portal.approachActive = false;
+                mGhostModeActive = false;
                 MWBase::World* world = MWBase::Environment::get().getWorld();
                 world->setPlayerGhostMode(false);
                 world->removePortalFloor();
@@ -904,6 +955,7 @@ namespace MWRender
                 if (portal.approachActive)
                 {
                     portal.approachActive = false;
+                    mGhostModeActive = false;
                     MWBase::World* world = MWBase::Environment::get().getWorld();
                     world->setPlayerGhostMode(false);
                     world->removePortalFloor();

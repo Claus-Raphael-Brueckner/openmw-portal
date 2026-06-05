@@ -136,10 +136,11 @@ namespace MWPhysics
 
     void Actor::setGhostMode(bool ghost)
     {
-        if (ghost)
-            addCollisionMask(CollisionType_HeightMap | CollisionType_PortalGuide);
-        else
-            addCollisionMask(getCollisionMask());
+        mGhostMode = ghost;
+        // Use setCollisionFilterMask (via updateCollisionMask) rather than addCollisionObject:
+        // addCollisionObject re-inserts into the broadphase every call, producing duplicate
+        // entries after repeated transitions which corrupt the broadphase and crash.
+        updateCollisionMask();
     }
 
     void Actor::addCollisionMask(int collisionMask)
@@ -154,6 +155,8 @@ namespace MWPhysics
 
     int Actor::getCollisionMask() const
     {
+        if (mGhostMode)
+            return CollisionType_HeightMap | CollisionType_PortalGuide;
         int collisionMask = CollisionType_World | CollisionType_HeightMap;
         if (mExternalCollisionMode)
             collisionMask |= CollisionType_Actor | CollisionType_Projectile | CollisionType_Door;

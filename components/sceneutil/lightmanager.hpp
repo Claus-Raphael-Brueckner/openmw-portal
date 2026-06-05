@@ -367,6 +367,8 @@ namespace SceneUtil
 
         std::set<SceneUtil::LightSource*>& getIgnoredLightSources() { return mIgnoredLightSources; }
 
+        void resetLightManager() { mLightManager = nullptr; }
+
     private:
         LightManager* mLightManager;
         size_t mLastFrameNumber;

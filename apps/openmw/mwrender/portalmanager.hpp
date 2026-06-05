@@ -85,6 +85,7 @@ namespace MWRender
         bool isWithinBounds(const osg::Vec3f& playerPos, const Portal& portal) const;
 
         std::vector<Portal> mPortals;
+        bool mGhostModeActive = false; ///< true while any portal has approachActive
         Resource::ResourceSystem* mResourceSystem;
         osg::Group* mRttParent;           ///< RTT nodes are added here (should outlive PortalManager)
         osg::Group* mExteriorTerrainNode = nullptr; ///< shared terrain root for exterior portals

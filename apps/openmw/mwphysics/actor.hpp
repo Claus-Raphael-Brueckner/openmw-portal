@@ -182,6 +182,7 @@ namespace MWPhysics
         osg::Vec3f mScale;
         osg::Vec3f mPositionOffset;
         bool mSkipSimulation = true;
+        bool mGhostMode = false;
         mutable std::mutex mPositionMutex;
 
         unsigned int mStuckFrames;
