@@ -325,6 +325,9 @@ namespace MWBase
         virtual void setPlayerGhostMode(bool ghost) = 0;
         virtual void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth) = 0;
         virtual void removePortalFloor() = 0;
+        virtual void addPortalGuideWalls(const osg::Vec3f& planePoint, const osg::Quat& portalRot,
+            float halfWidth, float halfHeight) = 0;
+        virtual void removePortalGuideWalls() = 0;
         ///< Toggle collision mode for player. If disabled player object should ignore
         /// collisions and gravity.
         /// \return Resulting mode

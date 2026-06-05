@@ -205,6 +205,12 @@ namespace MWPhysics
         void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth);
         void removePortalFloor();
 
+        /// Add two angled guide walls that funnel the player toward the portal opening.
+        /// portalRot is the door's full world rotation (invRot.inverse()).
+        void addPortalGuideWalls(const osg::Vec3f& planePoint, const osg::Quat& portalRot,
+            float halfWidth, float halfHeight);
+        void removePortalGuideWalls();
+
         /// Determine new position based on all queued movements, then clear the list.
         void stepSimulation(
             float dt, bool skipSimulation, osg::Timer_t frameStart, unsigned int frameNumber, osg::Stats& stats);
@@ -340,6 +346,10 @@ namespace MWPhysics
 
         std::unique_ptr<btCollisionObject> mPortalFloorObject;
         std::unique_ptr<btCollisionShape> mPortalFloorShape;
+
+        std::unique_ptr<btCollisionObject> mPortalWallLeft;
+        std::unique_ptr<btCollisionObject> mPortalWallRight;
+        std::unique_ptr<btCollisionShape>  mPortalWallShape;
 
         std::unique_ptr<MWRender::DebugDrawer> mDebugDrawer;
 

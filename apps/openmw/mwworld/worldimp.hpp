@@ -407,6 +407,9 @@ namespace MWWorld
         void setPlayerGhostMode(bool ghost) override;
         void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth) override;
         void removePortalFloor() override;
+        void addPortalGuideWalls(const osg::Vec3f& planePoint, const osg::Quat& portalRot,
+            float halfWidth, float halfHeight) override;
+        void removePortalGuideWalls() override;
         ///< Toggle collision mode for player. If disabled player object should ignore
         /// collisions and gravity.
         ///< \return Resulting mode

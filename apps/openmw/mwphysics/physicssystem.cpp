@@ -16,6 +16,7 @@
 #include <BulletCollision/CollisionShapes/btSphereShape.h>
 #include <BulletCollision/CollisionShapes/btStaticPlaneShape.h>
 #include <BulletCollision/CollisionShapes/btBoxShape.h>
+#include <BulletCollision/CollisionShapes/btCylinderShape.h>
 
 #include <LinearMath/btQuickprof.h>
 #include <LinearMath/btVector3.h>
@@ -642,6 +643,69 @@ namespace MWPhysics
             mPortalFloorObject.reset();
             mPortalFloorShape.reset();
         }
+    }
+
+    void PhysicsSystem::addPortalGuideWalls(const osg::Vec3f& planePoint, const osg::Quat& portalRot,
+        float halfWidth, float halfHeight)
+    {
+        removePortalGuideWalls();
+
+        // Vertical cylinder standing at each portal edge.
+        // btCylinderShapeZ: axis = Z, half-extents = (radius, radius, halfHeight).
+        // Rotationally symmetric → no rotation needed, deflects from any approach angle.
+        const float radius = 45.f;
+        mPortalWallShape = std::make_unique<btCylinderShapeZ>(btVector3(radius, radius, halfHeight));
+
+        const btQuaternion portalQ(
+            static_cast<btScalar>(portalRot.x()),
+            static_cast<btScalar>(portalRot.y()),
+            static_cast<btScalar>(portalRot.z()),
+            static_cast<btScalar>(portalRot.w()));
+        const btVector3 origin(planePoint.x(), planePoint.y(), planePoint.z());
+
+        // Offset the cylinder toward the player so its back face is flush with the portal plane.
+        // In local portal space Y < 0 is the approach side, so shift by -radius along local Y.
+        const btScalar yOffset = -radius;
+
+        // Transform a local-space offset through the portal rotation into world space.
+        auto toWorld = [&](float localX) -> btVector3
+        {
+            const btTransform portalTr(portalQ, btVector3(0, 0, 0));
+            return portalTr * btVector3(localX, yOffset, 0.f) + origin;
+        };
+
+        auto makeWall = [&](float localX) -> std::unique_ptr<btCollisionObject>
+        {
+            auto obj = std::make_unique<btCollisionObject>();
+            obj->setCollisionShape(mPortalWallShape.get());
+            btTransform tr;
+            tr.setIdentity();
+            tr.setOrigin(toWorld(localX));
+            obj->setWorldTransform(tr);
+            mTaskScheduler->addCollisionObject(
+                obj.get(), CollisionType_PortalGuide, CollisionType_Actor);
+            return obj;
+        };
+
+        // Place cylinder centers at ±(halfWidth + radius) so the inner surface of each
+        // cylinder is flush with the portal edge at ±halfWidth — no intrusion into the opening.
+        mPortalWallLeft  = makeWall(-(halfWidth + radius));
+        mPortalWallRight = makeWall( (halfWidth + radius));
+    }
+
+    void PhysicsSystem::removePortalGuideWalls()
+    {
+        if (mPortalWallLeft)
+        {
+            mTaskScheduler->removeCollisionObject(mPortalWallLeft.get());
+            mPortalWallLeft.reset();
+        }
+        if (mPortalWallRight)
+        {
+            mTaskScheduler->removeCollisionObject(mPortalWallRight.get());
+            mPortalWallRight.reset();
+        }
+        mPortalWallShape.reset();
     }
 
     bool PhysicsSystem::toggleCollisionMode()

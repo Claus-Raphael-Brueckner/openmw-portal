@@ -1554,6 +1554,17 @@ namespace MWWorld
         mPhysics->removePortalFloor();
     }
 
+    void World::addPortalGuideWalls(const osg::Vec3f& planePoint, const osg::Quat& portalRot,
+        float halfWidth, float halfHeight)
+    {
+        mPhysics->addPortalGuideWalls(planePoint, portalRot, halfWidth, halfHeight);
+    }
+
+    void World::removePortalGuideWalls()
+    {
+        mPhysics->removePortalGuideWalls();
+    }
+
     bool World::toggleRenderMode(MWRender::RenderMode mode)
     {
         switch (mode)

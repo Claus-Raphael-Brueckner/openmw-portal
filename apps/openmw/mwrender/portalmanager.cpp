@@ -884,6 +884,9 @@ namespace MWRender
                 const float floorZ = portal.planePoint.z() - portal.halfExtents.y() - 5.f;
                 const osg::Vec3f floorCenter(portal.planePoint.x(), portal.planePoint.y(), floorZ);
                 world->addPortalFloor(floorCenter, 150.f, 150.f);
+                // Two angled guide walls funnelling the player toward the portal opening.
+                world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
+                    portal.halfExtents.x(), portal.halfExtents.y());
             }
             else if (!inApproachZone && portal.approachActive)
             {
@@ -891,6 +894,7 @@ namespace MWRender
                 MWBase::World* world = MWBase::Environment::get().getWorld();
                 world->setPlayerGhostMode(false);
                 world->removePortalFloor();
+                world->removePortalGuideWalls();
             }
 
             // Trigger only when crossing from outside (lastSide=true) to inside.
@@ -903,6 +907,7 @@ namespace MWRender
                     MWBase::World* world = MWBase::Environment::get().getWorld();
                     world->setPlayerGhostMode(false);
                     world->removePortalFloor();
+                    world->removePortalGuideWalls();
                 }
                 const ESM::RefId destCell = portal.door.getCellRef().getDestCell();
                 const ESM::Position destPos = portal.door.getCellRef().getDoorDest();
