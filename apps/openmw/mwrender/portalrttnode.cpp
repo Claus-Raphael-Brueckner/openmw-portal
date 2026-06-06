@@ -12,8 +12,8 @@
 namespace MWRender
 {
 
-PortalRTTNode::PortalRTTNode(osg::Group* portalScene, osg::Group* skyScene, uint32_t width, uint32_t height)
-    : RTTNode(width, height, 0, false, -1, StereoAwareness::Unaware, false)
+PortalRTTNode::PortalRTTNode(osg::Group* portalScene, osg::Group* skyScene, uint32_t width, uint32_t height, bool addMSAAIntermediateTarget)
+    : RTTNode(width, height, 0, false, -1, StereoAwareness::Unaware, addMSAAIntermediateTarget)
     , mPortalScene(portalScene)
     , mSkyScene(skyScene)
     , mViewMatrix(osg::Matrix::identity())
@@ -42,6 +42,25 @@ void PortalRTTNode::setDefaults(osg::Camera* camera)
     // Equation is updated each frame in apply() in eye space.
     mClipPlane = new osg::ClipPlane(0, 0.0, 0.0, 1.0, 0.0); // default: always pass
     osg::ref_ptr<osg::ClipNode> clipNode = new osg::ClipNode;
+    {
+        osg::ref_ptr<osg::StateSet> clipSS = clipNode->getOrCreateStateSet();
+        // Sky renders in RenderBin_Sky=-1 with depth write=false. OSG does not reset states that
+        // the next StateSet leaves unspecified, so depth write=false leaks into terrain/statics
+        // (bin 0) causing tree depth occlusion to break. Explicitly restore depth write=true here.
+        osg::ref_ptr<osg::Depth> sceneDepth = new SceneUtil::AutoDepth;
+        sceneDepth->setWriteMask(true);
+        clipSS->setAttributeAndModes(sceneDepth, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+        // Explicitly enable GL_CLIP_PLANE0 via the mode map as well as the attribute mechanism.
+        // OSG tracks modes and attributes separately; if the sky StateSet previously set
+        // GL_CLIP_PLANE0=OFF via mode, OSG's mode-map might not re-enable the clip plane even
+        // though the ClipPlane attribute calls glEnable. Setting the mode to ON here ensures both
+        // tracking paths agree and the clip plane is reliably activated.
+        clipSS->setMode(GL_CLIP_PLANE0, osg::StateAttribute::ON);
+        // Also reset GL_BLEND to OFF so sky's leaked GL_BLEND=ON cannot interact with opaque
+        // terrain rendering. Alpha-blended objects (vegetation) re-enable GL_BLEND in their own
+        // StateSets (child overrides parent), so transparent geometry is unaffected.
+        clipSS->setMode(GL_BLEND, osg::StateAttribute::OFF);
+    }
     clipNode->addClipPlane(mClipPlane.get());
     clipNode->addChild(mPortalScene);
     camera->addChild(clipNode);

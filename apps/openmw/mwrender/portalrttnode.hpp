@@ -21,7 +21,7 @@ class PortalRTTNode : public SceneUtil::RTTNode
 public:
     /// @param portalScene  Clipped geometry (terrain, statics) — placed under GL_CLIP_PLANE0.
     /// @param skyScene     Optional sky geometry — added directly to the camera, never clipped.
-    explicit PortalRTTNode(osg::Group* portalScene, osg::Group* skyScene, uint32_t width, uint32_t height);
+    explicit PortalRTTNode(osg::Group* portalScene, osg::Group* skyScene, uint32_t width, uint32_t height, bool addMSAAIntermediateTarget = false);
 
     void setViewMatrix(const osg::Matrix& v) { mViewMatrix = v; }
     void setProjectionMatrix(const osg::Matrix& p) { mProjMatrix = p; }

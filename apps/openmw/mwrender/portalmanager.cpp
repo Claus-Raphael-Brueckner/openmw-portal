@@ -1,6 +1,7 @@
 #include "portalmanager.hpp"
 #include "sky.hpp"
 #include "skyutil.hpp"
+#include "util.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -303,7 +304,12 @@ namespace MWRender
             lightManager->processChangedSettings(1.f, 0.f, 0.f);
 
             osg::ref_ptr<osg::StateSet> ss = lightManager->getOrCreateStateSet();
-            ss->setDefine("FORCE_OPAQUE", "1", osg::StateAttribute::ON);
+            // FORCE_OPAQUE is intentionally NOT set here.
+            // portal.frag already forces gl_FragData[0].a=1.0 on the portal quad output,
+            // so FORCE_OPAQUE in the RTT scene is redundant. With alphaToCoverage enabled
+            // (MSAA+AntialiasAlphaTest), FORCE_OPAQUE would override coverageAlpha≈0 back to 1.0
+            // before GL_SAMPLE_ALPHA_TO_COVERAGE reads it, defeating alpha-tested transparency
+            // and rendering tree leaves / thatch as solid black in the portal.
             ss->setMode(GL_NORMALIZE, osg::StateAttribute::ON);
 
             // Uniforms the object shaders depend on.
@@ -699,16 +705,13 @@ namespace MWRender
                     skyScene = skyWrapper;
             }
 
-            portal.rttNode = new PortalRTTNode(portalScene.get(), skyScene.get(), screenW, screenH);
+            portal.rttNode = new PortalRTTNode(portalScene.get(), skyScene.get(), screenW, screenH, shouldAddMSAAIntermediateTarget());
             portal.destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
             if (portal.destIsExterior)
                 portal.rttNode->setClearColor(mExteriorSkyColor);
             {
-                // Clip plane: keep geometry on the interior (destination) side of the portal plane.
-                // Normal = destFwd = inward (into destination, toward RTT camera). Matches the
-                // OpenGL near-plane convention: near-plane normal also points away from camera into scene.
-                // Plane point = exact destDoorPos (no offset). GL transforms world-space coords to
-                // eye-space via the current model-view (see PortalRTTNode::apply()).
+                // Clip plane: keep geometry on the destination side of the portal plane.
+                // Normal = destFwd = into destination (away from player).
                 const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
                 portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos);
             }
@@ -902,7 +905,22 @@ namespace MWRender
                 }
 
                 portal.rttNode->setViewMatrix(portalView);
-                portal.rttNode->setProjectionMatrix(projMatrix);
+
+                // The main camera's near/far is auto-computed for the interior scene (typically
+                // near = 3–10 units). For the exterior portal RTT, objects can be as close as
+                // 1 unit to the RTT camera. Using the interior near clips nearby exterior
+                // geometry, and the resulting depth-buffer range is suboptimal for the exterior,
+                // causing z-fighting between nearly-coplanar surfaces (e.g. thatch and beams).
+                // Use a fixed exterior-friendly projection with the same FOV/aspect as the main
+                // camera but a smaller near (1 unit) and infinite far (reversed-z, no far clip).
+                {
+                    double fovY = 0.0, aspect = 0.0, nearP = 0.0, farP = 0.0;
+                    if (projMatrix.getPerspective(fovY, aspect, nearP, farP) && fovY > 0.0 && aspect > 0.0)
+                        portal.rttNode->setProjectionMatrix(
+                            SceneUtil::getReversedZProjectionMatrixAsPerspectiveInf(fovY, aspect, 1.0));
+                    else
+                        portal.rttNode->setProjectionMatrix(projMatrix);
+                }
 
             }
 

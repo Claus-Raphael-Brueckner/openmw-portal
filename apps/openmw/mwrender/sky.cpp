@@ -487,13 +487,30 @@ namespace MWRender
     {
         if (!mCreated || !mEarlyRenderBinRoot)
             return;
-        // A proxy group carrying mEarlyRenderBinRoot's StateSet provides the pass=-1 uniform,
-        // RenderBin_Sky=-1, depth/blend/fog state that sky shaders require. We cannot add
-        // mEarlyRenderBinRoot itself — its nodeMask=0 when sky is disabled (interior cell).
-        // Moons (Masser/Secunda) have nodeMask=~0u and render as untextured white quads in
-        // the portal RTT context — exclude them. Sun excluded via cull mask (occlusion queries).
+        // Build a fresh StateSet rather than sharing mEarlyRenderBinRoot's.
+        // mEarlyRenderBinRoot sets GL_CLIP_PLANE0=OFF, which desyncs OSG's mode-tracking
+        // from the ClipNode's clip-plane attribute: after the sky pass (bin -1) runs,
+        // OSG thinks GL_CLIP_PLANE0 is OFF and won't re-enable it for the ClipNode (bin 0),
+        // causing the portal clip plane to fail intermittently → z-fighting-like flicker.
+        // The sky wrapper is already outside the ClipNode, so the clip plane is inactive
+        // there anyway — we don't need to set it OFF explicitly.
+        osg::ref_ptr<osg::StateSet> proxyStateSet = new osg::StateSet;
+        proxyStateSet->setRenderBinDetails(RenderBin_Sky, "RenderBin");
+        proxyStateSet->addUniform(new osg::Uniform("pass", -1));
+        // Sky shader program must be inherited — without it the geometry uses the forward
+        // shader which ignores the pass uniform and outputs incorrect colors.
+        if (auto* prog = mEarlyRenderBinRoot->getOrCreateStateSet()->getAttribute(osg::StateAttribute::PROGRAM))
+            proxyStateSet->setAttributeAndModes(prog, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+        {
+            osg::ref_ptr<osg::Depth> skyDepth = new SceneUtil::AutoDepth;
+            skyDepth->setWriteMask(false);
+            proxyStateSet->setAttributeAndModes(skyDepth, osg::StateAttribute::ON);
+        }
+        proxyStateSet->setMode(GL_BLEND, osg::StateAttribute::ON);
+        proxyStateSet->setMode(GL_FOG, osg::StateAttribute::OFF);
+
         osg::ref_ptr<osg::Group> proxy = new osg::Group;
-        proxy->setStateSet(mEarlyRenderBinRoot->getOrCreateStateSet());
+        proxy->setStateSet(proxyStateSet);
         if (mAtmosphereDay)
             proxy->addChild(mAtmosphereDay);
         if (mAtmosphereNightNode)
