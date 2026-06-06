@@ -435,25 +435,6 @@ namespace MWRender
             return lightManager;
         }
 
-        // Traverses a node tree and resets the mLightManager cache on every LightListCallback.
-        // Required when a shared node (e.g. mExteriorTerrainNode) is removed from a portal's
-        // LightManager: the callbacks still hold a raw pointer to the now-destroyed LightManager,
-        // causing a null/dangling dereference on the next cull. Resetting to nullptr forces them
-        // to re-discover the correct LightManager from the nodepath on the next traversal.
-        class ResetLightManagerVisitor : public osg::NodeVisitor
-        {
-        public:
-            ResetLightManagerVisitor()
-                : osg::NodeVisitor(osg::NodeVisitor::TRAVERSE_ALL_CHILDREN) {}
-
-            void apply(osg::Node& node) override
-            {
-                for (osg::Callback* cb = node.getCullCallback(); cb; cb = cb->getNestedCallback())
-                    if (auto* llc = dynamic_cast<SceneUtil::LightListCallback*>(cb))
-                        llc->resetLightManager();
-                traverse(node);
-            }
-        };
     }
 
     PortalManager::PortalManager(Resource::ResourceSystem* resourceSystem, osg::Group* rttParent)
@@ -475,10 +456,19 @@ namespace MWRender
             return false;
         std::string model = base->mModel;
         Misc::StringUtils::lowerCaseInPlace(model);
-        // Match the cave door on both sides: exterior entrance and the matching interior door.
-        // Both typically use ex_cave_door_01. In_cave_door_01 covers some interior variants.
-        return model.find("ex_cave_door_01.nif") != std::string::npos
-            || model.find("in_cave_door_01.nif") != std::string::npos;
+        static const std::string_view sPortalModels[] = {
+            "ex_cave_door_01.nif",
+            "in_cave_door_01.nif",
+            "ex_nord_door_01.nif",
+            "hlaalu_loaddoor_ 02.nif",
+            "in_hlaalu_door.nif",
+            "ex_velothi_loaddoor_01.nif",
+            "in_velothismall_ndoor_01.nif",
+        };
+        for (const auto& pattern : sPortalModels)
+            if (model.find(pattern) != std::string::npos)
+                return true;
+        return false;
     }
 
     osg::Vec2f PortalManager::computeHalfExtents(const MWWorld::Ptr& door) const
@@ -658,6 +648,9 @@ namespace MWRender
             if (destCellStore)
             {
                 const ESM::RefId sourceCellId = door.getCell()->getCell()->getId();
+                // Pick the door closest to destPoint when multiple doors lead back to the same
+                // source cell (e.g. several Hlaalu buildings sharing an exterior cell).
+                float bestDistSq = std::numeric_limits<float>::max();
                 for (const auto& ref : destCellStore->getReadOnlyDoors().mList)
                 {
                     if (!ref.mBase || !ref.mRef.getTeleport())
@@ -666,6 +659,11 @@ namespace MWRender
                         continue;
 
                     const ESM::Position& dPos = ref.mRef.getPosition();
+                    const float distSq = (dPos.asVec3() - portal.destPoint).length2();
+                    if (distSq >= bestDistSq)
+                        continue;
+                    bestDistSq = distSq;
+
                     osg::Quat destCellRefRot = Misc::Convert::makeOsgQuat(dPos);
                     osg::Quat destNifRootQuat;
                     if (!ref.mBase->mModel.empty())
@@ -683,7 +681,6 @@ namespace MWRender
                     }
                     portal.destDoorPos = dPos.asVec3();
                     portal.destDoorRot = destCellRefRot * destNifRootQuat;
-                    break;
                 }
             }
 
@@ -751,17 +748,19 @@ namespace MWRender
             // while physics state is in flux; calling setCollisionFilterMask then crashes.
             // mGhostModeActive stays true so update() cleans up on the next stable frame.
 
-            // Reset LightListCallback caches on the shared exterior terrain BEFORE the portal
-            // LightManager is freed. The terrain's LightListCallbacks cache a raw mLightManager
-            // pointer; if that pointer becomes dangling the next cull crashes with a null light.
-            if (it->destIsExterior && mExteriorTerrainNode)
-            {
-                ResetLightManagerVisitor resetVisitor;
-                mExteriorTerrainNode->accept(resetVisitor);
-            }
-
             if (it->rttNode && mRttParent)
                 mRttParent->removeChild(it->rttNode);
+
+            // Detach the shared mExteriorTerrainNode from the portal scene so the portal's
+            // LightManager no longer owns a reference to it. In the no-sky case portalScene IS
+            // the LightManager; in the sky case the LightManager is the first child of the root.
+            if (it->destIsExterior && mExteriorTerrainNode && it->portalScene)
+            {
+                it->portalScene->removeChild(mExteriorTerrainNode);
+                for (unsigned int c = 0; c < it->portalScene->getNumChildren(); ++c)
+                    if (auto* g = dynamic_cast<osg::Group*>(it->portalScene->getChild(c)))
+                        g->removeChild(mExteriorTerrainNode);
+            }
             mPortals.erase(it);
         }
     }
@@ -924,28 +923,42 @@ namespace MWRender
             const bool inApproachZone = portal.lastSide && dist >= 0.f && dist < kApproachDist
                 && isWithinBounds(eyePos, portal);
 
+            // Check whether any OTHER portal already owns the ghost-mode physics objects.
+            // The floor/walls are a single shared physics resource; only one portal at a time
+            // may manage them. When multiple portals are nearby (e.g. two Hlaalu buildings
+            // side by side) we skip physics setup for subsequent portals so we never add/remove
+            // the same objects twice in the same frame, which would crash the task scheduler.
+            const bool anyOtherActive = std::any_of(mPortals.begin(), mPortals.end(),
+                [&portal](const Portal& p) { return p.approachActive && (&p != &portal); });
+
             if (inApproachZone && !portal.approachActive)
             {
                 portal.approachActive = true;
                 mGhostModeActive = true;
-                MWBase::World* world = MWBase::Environment::get().getWorld();
-                world->setPlayerGhostMode(true);
-                // Floor box: 300×300, 10 units thick, placed 5 units below the door base.
-                const float floorZ = portal.planePoint.z() - portal.halfExtents.y() - 5.f;
-                const osg::Vec3f floorCenter(portal.planePoint.x(), portal.planePoint.y(), floorZ);
-                world->addPortalFloor(floorCenter, 150.f, 150.f);
-                // Two angled guide walls funnelling the player toward the portal opening.
-                world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
-                    portal.halfExtents.x(), portal.halfExtents.y());
+                if (!anyOtherActive)
+                {
+                    MWBase::World* world = MWBase::Environment::get().getWorld();
+                    world->setPlayerGhostMode(true);
+                    // Floor box: 300×300, 10 units thick, placed 5 units below the door base.
+                    const float floorZ = portal.planePoint.z() - portal.halfExtents.y() - 5.f;
+                    const osg::Vec3f floorCenter(portal.planePoint.x(), portal.planePoint.y(), floorZ);
+                    world->addPortalFloor(floorCenter, 150.f, 150.f);
+                    // Two angled guide walls funnelling the player toward the portal opening.
+                    world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
+                        portal.halfExtents.x(), portal.halfExtents.y());
+                }
             }
             else if (!inApproachZone && portal.approachActive)
             {
                 portal.approachActive = false;
-                mGhostModeActive = false;
-                MWBase::World* world = MWBase::Environment::get().getWorld();
-                world->setPlayerGhostMode(false);
-                world->removePortalFloor();
-                world->removePortalGuideWalls();
+                if (!anyOtherActive)
+                {
+                    mGhostModeActive = false;
+                    MWBase::World* world = MWBase::Environment::get().getWorld();
+                    world->setPlayerGhostMode(false);
+                    world->removePortalFloor();
+                    world->removePortalGuideWalls();
+                }
             }
 
             // Trigger only when crossing from outside (lastSide=true) to inside.

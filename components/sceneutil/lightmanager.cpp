@@ -1058,6 +1058,20 @@ namespace SceneUtil
             if (!mLightManager)
                 return false;
         }
+        else
+        {
+            // Verify the cached LightManager is still an ancestor in the current node path.
+            // A portal RTT scene may have been destroyed since the LLC last ran, leaving mLightManager
+            // as a dangling pointer. The comparison is pointer-value-only and is safe even if the
+            // object was freed, since we never dereference through the dangling pointer here.
+            const osg::NodePath& path = cv->getNodePath();
+            if (std::find(path.begin(), path.end(), static_cast<osg::Node*>(mLightManager)) == path.end())
+            {
+                mLightManager = findLightManager(path);
+                if (!mLightManager)
+                    return false;
+            }
+        }
 
         if (!(cv->getTraversalMask() & mLightManager->getLightingMask()))
             return false;
