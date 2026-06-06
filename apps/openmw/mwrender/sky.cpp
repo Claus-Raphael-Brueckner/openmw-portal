@@ -483,6 +483,26 @@ namespace MWRender
         }
     }
 
+    void SkyManager::populatePortalSkyGroup(osg::Group* dest) const
+    {
+        if (!mCreated || !mEarlyRenderBinRoot)
+            return;
+        // A proxy group carrying mEarlyRenderBinRoot's StateSet provides the pass=-1 uniform,
+        // RenderBin_Sky=-1, depth/blend/fog state that sky shaders require. We cannot add
+        // mEarlyRenderBinRoot itself — its nodeMask=0 when sky is disabled (interior cell).
+        // Moons (Masser/Secunda) have nodeMask=~0u and render as untextured white quads in
+        // the portal RTT context — exclude them. Sun excluded via cull mask (occlusion queries).
+        osg::ref_ptr<osg::Group> proxy = new osg::Group;
+        proxy->setStateSet(mEarlyRenderBinRoot->getOrCreateStateSet());
+        if (mAtmosphereDay)
+            proxy->addChild(mAtmosphereDay);
+        if (mAtmosphereNightNode)
+            proxy->addChild(mAtmosphereNightNode); // nodeMask=0 during day, safe to include
+        if (mCloudNode)
+            proxy->addChild(mCloudNode);
+        dest->addChild(proxy);
+    }
+
     int SkyManager::getMasserPhase() const
     {
         if (!mCreated)

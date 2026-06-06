@@ -416,20 +416,6 @@ namespace MWRender
                 if (exteriorTerrainNode)
                     lightManager->addChild(exteriorTerrainNode);
 
-                // Fetch mSkyNode lazily — sky is created after RenderingManager construction.
-                // Wrap in a new CameraRelativeTransform (excludes mSkyRTT which crashes with a
-                // second camera). Cull mask includes Mask_Sky but NOT Mask_Sun so the Sun's
-                // occlusion queries are culled and don't crash the portal RTT camera.
-                osg::Group* skyNode = skyManager ? skyManager->getSkyNode() : nullptr;
-                if (skyNode)
-                {
-                    osg::ref_ptr<CameraRelativeTransform> skyWrapper = new CameraRelativeTransform;
-                    skyWrapper->addChild(skyNode);
-                    osg::ref_ptr<osg::Group> root = new osg::Group;
-                    root->addChild(lightManager);
-                    root->addChild(skyWrapper);
-                    return root;
-                }
             }
 
             return lightManager;
@@ -694,7 +680,26 @@ namespace MWRender
 
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
-            portal.rttNode = new PortalRTTNode(portalScene.get(), screenW, screenH);
+
+            // Build sky scene for exterior destination portals. Sky is camera-relative and must
+            // not be clipped by the portal plane — it is passed separately to PortalRTTNode and
+            // added directly to the RTT camera, outside the ClipNode subtree.
+            // mSkyNode/mEarlyRenderBinRoot have nodeMask=0 when in interior; children are fine.
+            // Sun (Mask_Sun) is excluded by the portal camera cull mask — no occlusion-query crash.
+            const bool destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
+            osg::ref_ptr<osg::Group> skyScene;
+            if (destIsExterior && mSkyManager)
+            {
+                osg::ref_ptr<CameraRelativeTransform> skyWrapper = new CameraRelativeTransform;
+                skyWrapper->setNodeMask(Mask_Sky);
+                // RenderBin_Sky=-1 and the sky pass=-1 uniform are provided by the proxy
+                // group inside populatePortalSkyGroup (shares mEarlyRenderBinRoot's StateSet).
+                mSkyManager->populatePortalSkyGroup(skyWrapper.get());
+                if (skyWrapper->getNumChildren() > 0)
+                    skyScene = skyWrapper;
+            }
+
+            portal.rttNode = new PortalRTTNode(portalScene.get(), skyScene.get(), screenW, screenH);
             portal.destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
             if (portal.destIsExterior)
                 portal.rttNode->setClearColor(mExteriorSkyColor);

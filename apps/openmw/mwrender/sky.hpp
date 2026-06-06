@@ -109,6 +109,12 @@ namespace MWRender
         /// Wrap in a CameraRelativeTransform before adding to an RTT scene.
         osg::Group* getSkyNode() { return mSkyNode.get(); }
 
+        /// Adds sky geometry children to @p dest for use in portal RTT cameras.
+        /// Bypasses mSkyNode / mEarlyRenderBinRoot which have nodeMask=0 when sky is
+        /// disabled (interior cell). The Sun child (Mask_Sun) is safely excluded by the
+        /// portal camera's cull mask; other children manage their own node masks.
+        void populatePortalSkyGroup(osg::Group* dest) const;
+
     private:
         void create();
         ///< no need to call this, automatically done on first enable()

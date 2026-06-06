@@ -12,9 +12,10 @@
 namespace MWRender
 {
 
-PortalRTTNode::PortalRTTNode(osg::Group* portalScene, uint32_t width, uint32_t height)
+PortalRTTNode::PortalRTTNode(osg::Group* portalScene, osg::Group* skyScene, uint32_t width, uint32_t height)
     : RTTNode(width, height, 0, false, -1, StereoAwareness::Unaware, false)
     , mPortalScene(portalScene)
+    , mSkyScene(skyScene)
     , mViewMatrix(osg::Matrix::identity())
     , mProjMatrix(osg::Matrix::identity())
 {
@@ -44,6 +45,11 @@ void PortalRTTNode::setDefaults(osg::Camera* camera)
     clipNode->addClipPlane(mClipPlane.get());
     clipNode->addChild(mPortalScene);
     camera->addChild(clipNode);
+
+    // Sky is camera-relative and must never be clipped by the portal plane.
+    // Add it directly to the camera node, outside the ClipNode subtree.
+    if (mSkyScene)
+        camera->addChild(mSkyScene);
 }
 
 void PortalRTTNode::apply(osg::Camera* camera)
