@@ -50,6 +50,13 @@
 #include <components/sceneutil/statesetupdater.hpp>
 #include <components/settings/values.hpp>
 #include <components/shader/shadermanager.hpp>
+#include <components/fallback/fallback.hpp>
+#include <components/misc/constants.hpp>
+#include <components/nifosg/controller.hpp>
+#include <components/resource/imagemanager.hpp>
+#include <components/sceneutil/controller.hpp>
+#include <components/sceneutil/waterutil.hpp>
+#include "renderbin.hpp"
 #include <components/vfs/pathutil.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -66,6 +73,60 @@ namespace MWRender
 {
     namespace
     {
+        // Create a simple animated water node for exterior portal scenes.
+        // Replicates Water::createSimpleWaterStateSet(): base material + animated textures + shader.
+        osg::ref_ptr<osg::PositionAttitudeTransform> createPortalWaterNode(
+            float waterHeight, Resource::ResourceSystem* resourceSystem)
+        {
+            const float alpha = Fallback::Map::getFloat("Water_World_Alpha");
+            osg::ref_ptr<osg::Geometry> waterGeom
+                = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
+            waterGeom->setCullingActive(false);
+            waterGeom->setNodeMask(Mask_SimpleWater);
+
+            osg::ref_ptr<osg::StateSet> ss = SceneUtil::createSimpleWaterStateSet(alpha, RenderBin_Water);
+            waterGeom->setStateSet(ss);
+
+            // Load animated water textures (same frames as the main-scene simple water).
+            std::vector<osg::ref_ptr<osg::Texture2D>> textures;
+            const int frameCount = std::clamp(Fallback::Map::getInt("Water_SurfaceFrameCount"), 0, 320);
+            const std::string_view textureName = Fallback::Map::getString("Water_SurfaceTexture");
+            for (int i = 0; i < frameCount; ++i)
+            {
+                std::ostringstream texname;
+                texname << "textures/water/" << textureName
+                        << std::setw(2) << std::setfill('0') << i << ".dds";
+                const VFS::Path::Normalized path(texname.str());
+                try
+                {
+                    osg::ref_ptr<osg::Texture2D> tex(
+                        new osg::Texture2D(resourceSystem->getImageManager()->getImage(path)));
+                    tex->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+                    tex->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+                    resourceSystem->getSceneManager()->applyFilterSettings(tex);
+                    textures.push_back(tex);
+                }
+                catch (...) {}
+            }
+
+            if (!textures.empty())
+            {
+                const float fps = Fallback::Map::getFloat("Water_SurfaceFPS");
+                osg::ref_ptr<NifOsg::FlipController> controller(
+                    new NifOsg::FlipController(0, 1.f / fps, textures));
+                controller->setSource(std::make_shared<SceneUtil::FrameTimeSource>());
+                waterGeom->setUpdateCallback(controller);
+                ss->setTextureAttributeAndModes(0, textures[0], osg::StateAttribute::ON);
+                resourceSystem->getSceneManager()->recreateShaders(waterGeom);
+            }
+
+            osg::ref_ptr<osg::PositionAttitudeTransform> waterNode = new osg::PositionAttitudeTransform;
+            waterNode->setPosition(osg::Vec3f(0.f, 0.f, waterHeight));
+            waterNode->setNodeMask(Mask_SimpleWater);
+            waterNode->addChild(waterGeom);
+            return waterNode;
+        }
+
         // Extract the rotation quaternion from a NIF root node (if it carries a matrix transform).
         // Returns identity if the root is a plain osg::Group (identity transform in the NIF).
         osg::Quat getNifRootQuat(const osg::Node* node)
@@ -422,6 +483,9 @@ namespace MWRender
                 if (exteriorTerrainNode)
                     lightManager->addChild(exteriorTerrainNode);
 
+                if (cellStore->getCell()->hasWater())
+                    lightManager->addChild(createPortalWaterNode(
+                        cellStore->getCell()->getWaterHeight(), resourceSystem));
             }
 
             return lightManager;
