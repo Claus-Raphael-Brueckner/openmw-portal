@@ -91,6 +91,7 @@ namespace MWRender
             osg::Quat  destRot;      ///< orientation of the arrival point (forward = into dest)
             osg::Vec3f destDoorPos;  ///< world-space center of the actual destination door
             osg::Quat  destDoorRot;  ///< full rotation of the destination door (CellRef * NIF root)
+            osg::Vec3f destFwdCanonical; ///< horizontal unit vector pointing into the destination scene (spawn-derived)
             osg::ref_ptr<PortalRTTNode>      rttNode;         ///< RTT camera node, child of mRttParent
             osg::ref_ptr<SceneUtil::RTTNode> reflectionRTTNode; ///< water reflection camera (exterior portals)
             osg::ref_ptr<SceneUtil::RTTNode> refractionRTTNode; ///< water refraction camera (exterior portals)
@@ -103,7 +104,7 @@ namespace MWRender
             bool approachActive = false; ///< ghost mode currently active for this portal
         };
 
-        osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door) const;
+        osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Quat& nifRootQuat) const;
         osg::ref_ptr<osg::MatrixTransform> buildQuadNode(const osg::Vec2f& halfExtents, const osg::Quat& nifRootQuat) const;
         bool isWithinBounds(const osg::Vec3f& playerPos, const Portal& portal) const;
 
