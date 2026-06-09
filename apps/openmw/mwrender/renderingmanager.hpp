@@ -135,6 +135,8 @@ namespace MWRender
         void setNightEyeFactor(float factor);
 
         void setAmbientColour(const osg::Vec4f& colour);
+        void setWeatherAmbient(const osg::Vec4f& colour);
+        void setWeatherSunColour(const osg::Vec4f& diffuse);
 
         int skyGetMasserPhase() const;
         int skyGetSecundaPhase() const;
@@ -356,6 +358,12 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::PerViewUniformStateUpdater> mPerViewUniformStateUpdater;
 
         osg::Vec4f mAmbientColor;
+        // Exterior values from the weather system — only updated when player is in exterior.
+        // Remain valid (last exterior value) when player moves indoors, so exterior portals
+        // use correct outdoor lighting rather than interior cell values.
+        osg::Vec4f mWeatherAmbient;
+        osg::Vec4f mWeatherSunDiffuse;
+        osg::Vec4f mWeatherSunPos;
         float mNightEyeFactor;
 
         float mNearClip;

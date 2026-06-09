@@ -167,6 +167,13 @@ namespace SceneUtil
         return mViewDependentDataMap.begin()->second->mColorTexture.get();
     }
 
+    osg::Texture* RTTNode::getFirstDepthTexture()
+    {
+        if (mViewDependentDataMap.empty())
+            return nullptr;
+        return mViewDependentDataMap.begin()->second->mDepthTexture.get();
+    }
+
     osg::Texture* RTTNode::getDepthTexture(osgUtil::CullVisitor* cv)
     {
         return getViewDependentData(cv)->mDepthTexture;

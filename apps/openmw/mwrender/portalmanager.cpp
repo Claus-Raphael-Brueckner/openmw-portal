@@ -5,14 +5,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
 #include <components/debug/debuglog.hpp>
 
 #include <osg/ComputeBoundsVisitor>
+#include <osg/ClipNode>
+#include <osg/ClipPlane>
 #include <osg/Depth>
 #include <osg/Fog>
+#include <osg/FrontFace>
 #include <osg/Geode>
 #include <osg/Geometry>
 #include <osg/Group>
@@ -91,16 +95,16 @@ namespace MWRender
             return tex;
         }
 
-        // CullCallback on the portal water PAT: binds the main Water reflection RTT to unit 1.
-        // Lives on the PAT (parent), not the geometry, so the geometry's own StateSet cannot
-        // override it for unit 1 (geometry's StateSet omits the unit-1 texture binding).
-        class PortalWaterReflectionUpdater : public SceneUtil::StateSetUpdater
+        // CullCallback on the portal water PAT: binds reflection (unit 1) and optionally
+        // refraction color (unit 2) + depth (unit 3) from portal-specific RTT cameras.
+        // Uses getFirstColorTexture()/getFirstDepthTexture() because apply() is invoked from
+        // the portal RTT's own cull visitor, which has no entry in the reflection/refraction
+        // RTTNode's ViewDependentDataMap (those RTTs live in the main scene, not the portal scene).
+        class PortalWaterRTTUpdater : public SceneUtil::StateSetUpdater
         {
         public:
-            PortalWaterReflectionUpdater(SceneUtil::RTTNode* reflectionRTT, osg::Texture2D* fallback)
-                : mReflectionRTT(reflectionRTT)
-                , mFallback(fallback)
-            {}
+            PortalWaterRTTUpdater(SceneUtil::RTTNode* reflRTT, SceneUtil::RTTNode* refrRTT, osg::Texture2D* fallback)
+                : mReflectionRTT(reflRTT), mRefractionRTT(refrRTT), mFallback(fallback) {}
 
             void setDefaults(osg::StateSet* ss) override
             {
@@ -109,26 +113,167 @@ namespace MWRender
 
             void apply(osg::StateSet* ss, osg::NodeVisitor*) override
             {
-                osg::Texture* tex = mReflectionRTT ? mReflectionRTT->getFirstColorTexture() : nullptr;
-                ss->setTextureAttributeAndModes(1, tex ? tex : mFallback.get(), osg::StateAttribute::ON);
+                osg::Texture* reflTex = mReflectionRTT ? mReflectionRTT->getFirstColorTexture() : nullptr;
+                ss->setTextureAttributeAndModes(1, reflTex ? reflTex : mFallback.get(), osg::StateAttribute::ON);
+
+                if (mRefractionRTT)
+                {
+                    osg::Texture* refrColor = mRefractionRTT->getFirstColorTexture();
+                    osg::Texture* refrDepth = mRefractionRTT->getFirstDepthTexture();
+                    if (refrColor)
+                        ss->setTextureAttributeAndModes(2, refrColor, osg::StateAttribute::ON);
+                    if (refrDepth)
+                        ss->setTextureAttributeAndModes(3, refrDepth, osg::StateAttribute::ON);
+                }
             }
 
         private:
             osg::ref_ptr<SceneUtil::RTTNode> mReflectionRTT;
-            osg::ref_ptr<osg::Texture2D> mFallback;
+            osg::ref_ptr<SceneUtil::RTTNode> mRefractionRTT;
+            osg::ref_ptr<osg::Texture2D>     mFallback;
+        };
+
+        // RTTNode for portal water reflection: renders the portal scene from the portal camera's
+        // viewpoint reflected over the water plane. Must render BEFORE the portal RTT (order -3).
+        class PortalReflectionRTTNode : public SceneUtil::RTTNode
+        {
+        public:
+            PortalReflectionRTTNode(osg::Group* scene, float waterHeight, uint32_t w, uint32_t h, bool msaa)
+                : RTTNode(w, h, 0, false, -3, StereoAwareness::Unaware, msaa)
+                , mScene(scene), mWaterHeight(waterHeight)
+            {
+                setDepthBufferInternalFormat(GL_DEPTH24_STENCIL8);
+            }
+
+            void setDefaults(osg::Camera* camera) override
+            {
+                camera->setName("PortalReflectionCamera");
+                camera->setReferenceFrame(osg::Camera::ABSOLUTE_RF);
+                camera->setClearColor(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
+                camera->setClearMask(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                camera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
+                camera->setNodeMask(Mask_RenderToTexture);
+                SceneUtil::setCameraClearDepth(camera);
+
+                osg::ref_ptr<osg::StateSet> ss = camera->getOrCreateStateSet();
+                // Reflection flips winding order
+                ss->setAttributeAndModes(new osg::FrontFace(osg::FrontFace::CLOCKWISE), osg::StateAttribute::ON);
+                ss->addUniform(new osg::Uniform("isReflection", true));
+                SceneUtil::ShadowManager::instance().disableShadowsForStateSet(*ss);
+
+                // Clip plane: keep world z >= waterHeight (discard below-water geometry).
+                // World-space coefficients are passed here; OpenGL multiplies by (MV)^{-T} to
+                // get the correct eye-space equation, preserving world-z semantics for any MV.
+                osg::ref_ptr<osg::ClipPlane> clipPlane = new osg::ClipPlane(
+                    0, 0.0, 0.0, 1.0, -static_cast<double>(mWaterHeight));
+                osg::ref_ptr<osg::ClipNode> clipNode = new osg::ClipNode;
+                clipNode->addClipPlane(clipPlane);
+                clipNode->setStateSetModes(*clipNode->getOrCreateStateSet(), osg::StateAttribute::ON);
+                clipNode->setCullingActive(false);
+                clipNode->addChild(mScene);
+                camera->addChild(clipNode);
+            }
+
+            void apply(osg::Camera* camera) override
+            {
+                camera->setViewMatrix(mViewMatrix);
+                camera->setProjectionMatrix(mProjMatrix);
+                // No Mask_Water — no recursive reflection
+                camera->setCullMask(Mask_Scene | Mask_Sky | Mask_Terrain | Mask_Static | Mask_Object
+                                  | Mask_Lighting | Mask_ParticleSystem);
+            }
+
+            void setMatrices(const osg::Matrixd& portalView, const osg::Matrixd& proj)
+            {
+                // Reflect portal camera over the water plane (matches Water::Reflection's approach
+                // for RELATIVE_RF: finalMV = scale(1,1,-1) * translate(0,0,2h) * parentView)
+                mViewMatrix = osg::Matrix::scale(1.0, 1.0, -1.0)
+                            * osg::Matrix::translate(0.0, 0.0, 2.0 * mWaterHeight)
+                            * portalView;
+                mProjMatrix = proj;
+            }
+
+        private:
+            osg::ref_ptr<osg::Group> mScene;
+            float       mWaterHeight;
+            osg::Matrixd mViewMatrix;
+            osg::Matrixd mProjMatrix;
+        };
+
+        // RTTNode for portal water refraction: renders the portal scene from the portal camera's
+        // viewpoint with a slight vertical compression and clipped above the water plane.
+        // Provides refractionMap (unit 2) and refractionDepthMap (unit 3). Order: -2.
+        class PortalRefractionRTTNode : public SceneUtil::RTTNode
+        {
+        public:
+            PortalRefractionRTTNode(osg::Group* scene, float waterHeight, uint32_t w, uint32_t h, bool msaa)
+                : RTTNode(w, h, 0, false, -2, StereoAwareness::Unaware, msaa)
+                , mScene(scene), mWaterHeight(waterHeight)
+            {
+                setDepthBufferInternalFormat(GL_DEPTH24_STENCIL8);
+            }
+
+            void setDefaults(osg::Camera* camera) override
+            {
+                camera->setName("PortalRefractionCamera");
+                camera->setReferenceFrame(osg::Camera::ABSOLUTE_RF);
+                camera->setClearColor(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
+                camera->setClearMask(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+                camera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
+                camera->setNodeMask(Mask_RenderToTexture);
+                SceneUtil::setCameraClearDepth(camera);
+
+                osg::ref_ptr<osg::StateSet> ss = camera->getOrCreateStateSet();
+                SceneUtil::ShadowManager::instance().disableShadowsForStateSet(*ss);
+
+                // Clip plane: keep world z <= waterHeight (discard above-water geometry).
+                osg::ref_ptr<osg::ClipPlane> clipPlane = new osg::ClipPlane(
+                    0, 0.0, 0.0, -1.0, static_cast<double>(mWaterHeight));
+                osg::ref_ptr<osg::ClipNode> clipNode = new osg::ClipNode;
+                clipNode->addClipPlane(clipPlane);
+                clipNode->setStateSetModes(*clipNode->getOrCreateStateSet(), osg::StateAttribute::ON);
+                clipNode->setCullingActive(false);
+                clipNode->addChild(mScene);
+                camera->addChild(clipNode);
+            }
+
+            void apply(osg::Camera* camera) override
+            {
+                camera->setViewMatrix(mViewMatrix);
+                camera->setProjectionMatrix(mProjMatrix);
+                // No sky in refraction (underwater view)
+                camera->setCullMask(Mask_Scene | Mask_Terrain | Mask_Static | Mask_Object
+                                  | Mask_Lighting | Mask_ParticleSystem);
+            }
+
+            void setMatrices(const osg::Matrixd& portalView, const osg::Matrixd& proj)
+            {
+                // Vertical compression matches Water::Refraction for consistent depth appearance
+                const float s = Settings::water().mRefractionScale;
+                mViewMatrix = osg::Matrix::scale(1.0, 1.0, static_cast<double>(s))
+                            * osg::Matrix::translate(0.0, 0.0, (1.0 - s) * mWaterHeight)
+                            * portalView;
+                mProjMatrix = proj;
+            }
+
+        private:
+            osg::ref_ptr<osg::Group> mScene;
+            float        mWaterHeight;
+            osg::Matrixd mViewMatrix;
+            osg::Matrixd mProjMatrix;
         };
 
         // Build a water plane for exterior portal scenes.
-        // Tries the full water shader (normal map + Fresnel + specularity) with a sky-colour
-        // stand-in for the reflection map.  Falls back to simple animated water if the shader
-        // cannot be loaded.
+        // Uses dedicated portal reflection/refraction RTTs for correct water appearance.
         osg::ref_ptr<osg::PositionAttitudeTransform> createPortalWaterNode(
             float waterHeight,
             Resource::ResourceSystem* resourceSystem,
             Shader::ShaderManager& shaderMgr,
             const osg::Vec4f& skyColor,
+            float nearClip,
             osg::ref_ptr<osg::Texture2D>& outSkyTex,
-            SceneUtil::RTTNode* reflectionRTT)
+            SceneUtil::RTTNode* reflectionRTT,
+            SceneUtil::RTTNode* refractionRTT)
         {
             osg::ref_ptr<osg::Geometry> waterGeom
                 = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
@@ -144,11 +289,12 @@ namespace MWRender
             waterNode->setCullingActive(false);
             waterNode->addChild(waterGeom);
 
+            const bool hasRefraction = (refractionRTT != nullptr);
             bool shaderOk = false;
             try
             {
                 Shader::ShaderManager::DefineMap defines;
-                defines["waterRefraction"]     = "0";
+                defines["waterRefraction"]     = hasRefraction ? "1" : "0";
                 defines["rainRippleDetail"]    = "0";
                 defines["rippleMapWorldScale"] = std::to_string(MWRender::RipplesSurface::sWorldScaleFactor);
                 defines["rippleMapSize"]       = std::to_string(MWRender::RipplesSurface::sRTTSize) + ".0";
@@ -198,19 +344,22 @@ namespace MWRender
                 ss->addUniform(new osg::Uniform("normalMap",     0));
                 ss->setTextureAttributeAndModes(0, normalMap,    osg::StateAttribute::ON);
                 ss->addUniform(new osg::Uniform("reflectionMap", 1));
-                // Unit 1 texture is NOT bound here — PortalWaterReflectionUpdater on the PAT
-                // provides it each frame from the main Water reflection RTT (or skyTex fallback).
+                // Units 1/2/3 are NOT bound here — PortalWaterRTTUpdater on the PAT provides
+                // them each frame from the portal-specific reflection/refraction RTTs.
+                if (hasRefraction)
+                {
+                    ss->addUniform(new osg::Uniform("refractionMap",      2));
+                    ss->addUniform(new osg::Uniform("refractionDepthMap", 3));
+                }
                 ss->addUniform(new osg::Uniform("rippleMap",     4));
                 ss->setTextureAttributeAndModes(4, rippleDummy,  osg::StateAttribute::ON);
 
+                ss->addUniform(new osg::Uniform("near",          nearClip));
                 ss->addUniform(new osg::Uniform("nodePosition",  osg::Vec3f(0.f, 0.f, waterHeight)));
-                ss->addUniform(new osg::Uniform("playerPos",     osg::Vec3f(0.f, 0.f, 0.f)));
                 ss->addUniform(new osg::Uniform("rainIntensity", 0.f));
 
                 waterGeom->setStateSet(ss);
-                // Reflection texture is on the PAT so it can be updated each frame without the
-                // geometry's own StateSet (applied later, higher priority) overriding it.
-                waterNode->addCullCallback(new PortalWaterReflectionUpdater(reflectionRTT, skyTex.get()));
+                waterNode->addCullCallback(new PortalWaterRTTUpdater(reflectionRTT, refractionRTT, skyTex.get()));
                 outSkyTex = skyTex;
                 shaderOk = true;
             }
@@ -334,37 +483,50 @@ namespace MWRender
 
             void operator()(osg::Node* node, osg::NodeVisitor* nv) override
             {
-                // Drive LightController (flicker/pulse) directly, bypassing CollectLightCallback.
-                // TRAVERSE_NONE prevents any scene-graph modification from this path.
-                osg::NodeVisitor fakeNv(osg::NodeVisitor::UPDATE_VISITOR,
-                                        osg::NodeVisitor::TRAVERSE_NONE);
-                fakeNv.setFrameStamp(const_cast<osg::FrameStamp*>(nv->getFrameStamp()));
-                fakeNv.setTraversalNumber(nv->getTraversalNumber());
-                for (const auto& e : mEntries)
-                    if (e.ctrl) (*e.ctrl)(e.ls.get(), &fakeNv);
+                const size_t traversalNum = nv->getTraversalNumber();
 
-                // Drive osgParticle emitters and ParticleSystemUpdater in the statics subtree
-                // (torch flames, candles, etc.) using a plain NodeVisitor — NOT osgUtil::UpdateVisitor,
-                // which propagates dirty-counts up parent chains and crashes inside a cull callback.
-                if (mStatics)
+                // The portal scene is shared by up to 3 cameras (reflection, refraction, portal).
+                // update() + addLight() must run exactly once per frame — on the first cull pass.
+                // Subsequent passes for the same frame skip the reset so mLights stays consistent
+                // for every camera's LightListCallback. traverse() still runs for each camera so
+                // LightManagerCullCallback can push per-camera sunlight state and cull statics.
+                if (traversalNum != mLastUpdateTraversalNum)
                 {
-                    osg::NodeVisitor staticsNv(osg::NodeVisitor::UPDATE_VISITOR,
-                                               osg::NodeVisitor::TRAVERSE_ALL_CHILDREN);
-                    staticsNv.setFrameStamp(const_cast<osg::FrameStamp*>(nv->getFrameStamp()));
-                    staticsNv.setTraversalNumber(nv->getTraversalNumber());
-                    mStatics->accept(staticsNv);
+                    mLastUpdateTraversalNum = traversalNum;
+
+                    // Drive LightController (flicker/pulse) directly, bypassing CollectLightCallback.
+                    // TRAVERSE_NONE prevents any scene-graph modification from this path.
+                    osg::NodeVisitor fakeNv(osg::NodeVisitor::UPDATE_VISITOR,
+                                            osg::NodeVisitor::TRAVERSE_NONE);
+                    fakeNv.setFrameStamp(const_cast<osg::FrameStamp*>(nv->getFrameStamp()));
+                    fakeNv.setTraversalNumber(traversalNum);
+                    for (const auto& e : mEntries)
+                        if (e.ctrl) (*e.ctrl)(e.ls.get(), &fakeNv);
+
+                    // Drive osgParticle emitters and ParticleSystemUpdater in the statics subtree
+                    // (torch flames, candles, etc.) using a plain NodeVisitor — NOT osgUtil::UpdateVisitor,
+                    // which propagates dirty-counts up parent chains and crashes inside a cull callback.
+                    if (mStatics)
+                    {
+                        osg::NodeVisitor staticsNv(osg::NodeVisitor::UPDATE_VISITOR,
+                                                   osg::NodeVisitor::TRAVERSE_ALL_CHILDREN);
+                        staticsNv.setFrameStamp(const_cast<osg::FrameStamp*>(nv->getFrameStamp()));
+                        staticsNv.setTraversalNumber(traversalNum);
+                        mStatics->accept(staticsNv);
+                    }
+
+                    // Clears mLights and mLightsInViewSpace, then re-adds lights with fresh
+                    // world matrices so getLightsInViewSpace rebuilds view-space positions
+                    // against the current RTT camera view matrix this frame.
+                    mLightManager->update(traversalNum);
+                    for (const auto& e : mEntries)
+                    {
+                        osg::Matrixf worldMat;
+                        worldMat.setTrans(e.pos);
+                        mLightManager->addLight(e.ls.get(), worldMat, traversalNum);
+                    }
                 }
 
-                // Clears mLights and mLightsInViewSpace, then re-adds lights with fresh
-                // world matrices so getLightsInViewSpace rebuilds view-space positions
-                // against the current RTT camera view matrix this frame.
-                mLightManager->update(nv->getTraversalNumber());
-                for (const auto& e : mEntries)
-                {
-                    osg::Matrixf worldMat;
-                    worldMat.setTrans(e.pos);
-                    mLightManager->addLight(e.ls.get(), worldMat, nv->getTraversalNumber());
-                }
                 traverse(node, nv);  // chains to LightManagerCullCallback
             }
 
@@ -372,6 +534,7 @@ namespace MWRender
             SceneUtil::LightManager*        mLightManager;
             osg::ref_ptr<osg::Group>        mStatics;
             std::vector<Entry>              mEntries;
+            size_t                          mLastUpdateTraversalNum = std::numeric_limits<size_t>::max();
         };
 
         // Load static geometry from the destination cell into a plain group.
@@ -398,6 +561,8 @@ namespace MWRender
                     if (!ref.mBase || ref.mBase->mModel.empty())
                         continue;
                     if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef))
+                        continue;
+                    if (!ref.mData.isEnabled())
                         continue;
 
                     const ESM::Position& pos = ref.mRef.getPosition();
@@ -432,6 +597,7 @@ namespace MWRender
             {
                 if (!ref.mBase || ref.mBase->mModel.empty()) continue;
                 if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef)) continue;
+                if (!ref.mData.isEnabled()) continue;
                 if (ref.mRef.getTeleport()) continue;  // portal doors: skip
                 const ESM::Position& pos = ref.mRef.getPosition();
                 const float dx = pos.pos[0] - destCenter.x();
@@ -460,17 +626,28 @@ namespace MWRender
             return group;
         }
 
+        struct PortalSceneResult
+        {
+            osg::ref_ptr<osg::Group>      scene;
+            osg::ref_ptr<osg::Light>      sunLight;
+            osg::ref_ptr<osg::LightModel> lightModelAttr;
+            float                         waterHeight = 0.f;
+        };
+
         // Wrap the geometry in a LightManager with a directional light, cell point lights, and
-        // all uniforms that OpenMW's object shaders expect. Mirrors CharacterPreview's RTT setup.
-        osg::ref_ptr<osg::Group> buildPortalScene(
+        // all uniforms that OpenMW's object shaders expect. Does NOT add water — caller does that
+        // after creating the reflection/refraction RTTs.
+        PortalSceneResult buildPortalScene(
             MWWorld::CellStore* cellStore,
             const osg::Vec3f& destCenter,
             Resource::ResourceSystem* resourceSystem,
             osg::Group* exteriorTerrainNode,
             SkyManager* skyManager,
-            const osg::Vec4f& skyColor = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f),
-            osg::ref_ptr<osg::Texture2D>* outWaterSkyTex = nullptr,
-            SceneUtil::RTTNode* reflectionRTT = nullptr)
+            const osg::Vec2f& screenRes,
+            const osg::Vec4f& ambient,
+            const osg::Vec4f& diffuse,
+            const osg::Vec3f& sunDir,
+            const osg::Vec4f& skyColor = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f))
         {
             constexpr float kMaxDist = 5000.f;
             osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, kMaxDist);
@@ -504,7 +681,7 @@ namespace MWRender
             // Uniforms the object shaders depend on.
             ss->addUniform(new osg::Uniform("far", 100000.0f));
             ss->addUniform(new osg::Uniform("skyBlendingStart", 90000.0f));
-            ss->addUniform(new osg::Uniform("screenRes", osg::Vec2f(1.f, 1.f)));
+            ss->addUniform(new osg::Uniform("screenRes", screenRes));
             ss->addUniform(new osg::Uniform("emissiveMult", 1.f));
             ss->addUniform(new osg::Uniform("specStrength", 1.f));
 
@@ -526,37 +703,31 @@ namespace MWRender
             dummyTex->setShadowCompareFunc(osg::Texture::ShadowCompareFunc::ALWAYS);
             ss->setTextureAttributeAndModes(7, dummyTex, osg::StateAttribute::ON);
 
-            // Directional light: use cell mood for interiors; for exterior cells (cave→outside portal)
-            // getMood() returns zeros — use a fixed daytime approximation instead.
-            osg::Vec4f ambient(0.3f, 0.3f, 0.3f, 1.f);
-            osg::Vec4f diffuse(0.7f, 0.7f, 0.7f, 1.f);
+            // Directional light: for interiors use cell mood; for exteriors use the caller-supplied
+            // values (updated each frame from RenderingManager with real sun direction/color).
+            osg::Vec4f effectiveAmbient = ambient;
+            osg::Vec4f effectiveDiffuse = diffuse;
+            osg::Vec4f effectiveSunPos  = osg::Vec4f(sunDir, 0.f);
             const bool isExterior = cellStore && cellStore->getCell()->isExterior();
             if (cellStore && !isExterior)
             {
                 const MWWorld::Cell* cell = cellStore->getCell();
-                ambient = SceneUtil::colourFromRGB(cell->getMood().mAmbiantColor);
-                diffuse = SceneUtil::colourFromRGB(cell->getMood().mDirectionalColor);
-            }
-            else if (isExterior)
-            {
-                ambient = osg::Vec4f(0.35f, 0.35f, 0.35f, 1.f);
-                diffuse = osg::Vec4f(0.85f, 0.80f, 0.70f, 1.f);  // warm daylight
+                effectiveAmbient = SceneUtil::colourFromRGB(cell->getMood().mAmbiantColor);
+                effectiveDiffuse = SceneUtil::colourFromRGB(cell->getMood().mDirectionalColor);
+                // Interior sun convention (Morrowind style)
+                effectiveSunPos = osg::Vec4f(-1.f, osg::DegreesToRadians(45.f), osg::DegreesToRadians(45.f), 0.f);
             }
 
-            // Ambient goes on LightModel (matches CharacterPreview pattern and OpenMW shader expectations).
+            // Ambient on LightModel (matches CharacterPreview pattern and OpenMW shader expectations).
             osg::ref_ptr<osg::LightModel> lightModel = new osg::LightModel;
-            lightModel->setAmbientIntensity(ambient);
+            lightModel->setAmbientIntensity(effectiveAmbient);
             ss->setAttributeAndModes(lightModel, osg::StateAttribute::ON);
 
-            // Sun direction: interior uses Morrowind's convention; exterior uses a midday approximation.
-            const osg::Vec4f sunPos = isExterior
-                ? osg::Vec4f(0.5f, -0.5f, 1.f, 0.f)
-                : osg::Vec4f(-1.f, osg::DegreesToRadians(45.f), osg::DegreesToRadians(45.f), 0.f);
             osg::ref_ptr<osg::Light> light = new osg::Light;
             light->setLightNum(0);
-            light->setPosition(sunPos);
+            light->setPosition(effectiveSunPos);
             light->setAmbient(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
-            light->setDiffuse(diffuse);
+            light->setDiffuse(effectiveDiffuse);
             light->setSpecular(osg::Vec4f(0.f, 0.f, 0.f, 0.f));
             light->setConstantAttenuation(1.f);
             light->setLinearAttenuation(0.f);
@@ -579,6 +750,7 @@ namespace MWRender
                 {
                     if (!ref.mBase) continue;
                     if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef)) continue;
+                    if (!ref.mData.isEnabled()) continue;
                     const ESM::Position& pos = ref.mRef.getPosition();
                     const float dx = pos.pos[0] - destCenter.x();
                     const float dy = pos.pos[1] - destCenter.y();
@@ -606,25 +778,16 @@ namespace MWRender
 
             lightManager->addChild(statics);
 
-            if (isExterior)
-            {
-                if (exteriorTerrainNode)
-                    lightManager->addChild(exteriorTerrainNode);
+            if (isExterior && exteriorTerrainNode)
+                lightManager->addChild(exteriorTerrainNode);
 
-                if (cellStore->getCell()->hasWater())
-                {
-                    osg::ref_ptr<osg::Texture2D> waterSkyTex;
-                    osg::ref_ptr<osg::PositionAttitudeTransform> wn = createPortalWaterNode(
-                        cellStore->getCell()->getWaterHeight(), resourceSystem,
-                        resourceSystem->getSceneManager()->getShaderManager(),
-                        skyColor, waterSkyTex, reflectionRTT);
-                    if (outWaterSkyTex)
-                        *outWaterSkyTex = waterSkyTex;
-                    lightManager->addChild(wn);
-                }
-            }
+            // Water is NOT added here — caller creates reflection/refraction RTTs first,
+            // then calls createPortalWaterNode() and adds it to the returned lightManager.
+            float waterHeight = 0.f;
+            if (isExterior && cellStore->getCell()->hasWater())
+                waterHeight = cellStore->getCell()->getWaterHeight();
 
-            return lightManager;
+            return PortalSceneResult{ lightManager, light, lightModel, waterHeight };
         }
 
     }
@@ -636,6 +799,13 @@ namespace MWRender
     }
 
     PortalManager::~PortalManager() = default;
+
+    void PortalManager::setExteriorLighting(const osg::Vec4f& ambient, const osg::Vec4f& diffuse, const osg::Vec3f& sunDir)
+    {
+        mExteriorAmbient = ambient;
+        mExteriorDiffuse = diffuse;
+        mExteriorSunDir  = sunDir;
+    }
 
     // --------------------------------------------------------------------------
 
@@ -876,38 +1046,66 @@ namespace MWRender
                 }
             }
 
-            osg::ref_ptr<osg::Texture2D> waterSkyTex;
-            osg::ref_ptr<osg::Group> portalScene
-                = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode, mSkyManager, mExteriorSkyColor, &waterSkyTex, mReflectionRTT);
-
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
 
-            // Build sky scene for exterior destination portals. Sky is camera-relative and must
-            // not be clipped by the portal plane — it is passed separately to PortalRTTNode and
-            // added directly to the RTT camera, outside the ClipNode subtree.
-            // mSkyNode/mEarlyRenderBinRoot have nodeMask=0 when in interior; children are fine.
-            // Sun (Mask_Sun) is excluded by the portal camera cull mask — no occlusion-query crash.
+            // Build scene (statics + terrain, no water yet).
+            PortalSceneResult sceneResult = buildPortalScene(
+                destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode,
+                mSkyManager, osg::Vec2f(float(screenW), float(screenH)),
+                mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, mExteriorSkyColor);
+
             const bool destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
+            const bool hasWater = destIsExterior && destCellStore->getCell()->hasWater();
+
+            // Create reflection and refraction RTTs before adding water (water needs refs to them).
+            if (hasWater && mRttParent)
+            {
+                auto* scene = sceneResult.scene.get();
+                portal.reflectionRTTNode = new PortalReflectionRTTNode(
+                    scene, sceneResult.waterHeight, screenW, screenH, shouldAddMSAAIntermediateTarget());
+                portal.reflectionRTTNode->setNodeMask(Mask_RenderToTexture);
+                mRttParent->addChild(portal.reflectionRTTNode);
+
+                portal.refractionRTTNode = new PortalRefractionRTTNode(
+                    scene, sceneResult.waterHeight, screenW, screenH, shouldAddMSAAIntermediateTarget());
+                portal.refractionRTTNode->setNodeMask(Mask_RenderToTexture);
+                mRttParent->addChild(portal.refractionRTTNode);
+            }
+
+            // Now add water with proper reflection/refraction RTTs.
+            if (hasWater)
+            {
+                osg::ref_ptr<osg::Texture2D> waterSkyTex;
+                Shader::ShaderManager& waterShaderMgr = mResourceSystem->getSceneManager()->getShaderManager();
+                osg::ref_ptr<osg::PositionAttitudeTransform> wn = createPortalWaterNode(
+                    sceneResult.waterHeight, mResourceSystem, waterShaderMgr,
+                    mExteriorSkyColor, mNearClip, waterSkyTex,
+                    portal.reflectionRTTNode.get(), portal.refractionRTTNode.get());
+                portal.waterSkyTex = waterSkyTex;
+                portal.waterHeight = sceneResult.waterHeight;
+                sceneResult.scene->addChild(wn);
+            }
+
+            portal.sunLight     = sceneResult.sunLight;
+            portal.lightModelAttr = sceneResult.lightModelAttr;
+
+            // Build sky scene for exterior destination portals.
             osg::ref_ptr<osg::Group> skyScene;
             if (destIsExterior && mSkyManager)
             {
                 osg::ref_ptr<CameraRelativeTransform> skyWrapper = new CameraRelativeTransform;
                 skyWrapper->setNodeMask(Mask_Sky);
-                // RenderBin_Sky=-1 and the sky pass=-1 uniform are provided by the proxy
-                // group inside populatePortalSkyGroup (shares mEarlyRenderBinRoot's StateSet).
                 mSkyManager->populatePortalSkyGroup(skyWrapper.get());
                 if (skyWrapper->getNumChildren() > 0)
                     skyScene = skyWrapper;
             }
 
-            portal.rttNode = new PortalRTTNode(portalScene.get(), skyScene.get(), screenW, screenH, shouldAddMSAAIntermediateTarget());
-            portal.destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
-            if (portal.destIsExterior)
+            portal.rttNode = new PortalRTTNode(sceneResult.scene.get(), skyScene.get(), screenW, screenH, shouldAddMSAAIntermediateTarget());
+            portal.destIsExterior = destIsExterior;
+            if (destIsExterior)
                 portal.rttNode->setClearColor(mExteriorSkyColor);
             {
-                // Clip plane: keep geometry on the destination side of the portal plane.
-                // Normal = destFwd = into destination (away from player).
                 const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
                 portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos);
             }
@@ -916,8 +1114,6 @@ namespace MWRender
             if (mRttParent)
                 mRttParent->addChild(portal.rttNode);
 
-            // Portal shader: samples the RTT texture at screen-space UV.
-            // getProgram() throws on failure; caught below, rttNode cleaned up via portal.rttNode.
             Shader::ShaderManager& shaderMgr = mResourceSystem->getSceneManager()->getShaderManager();
             osg::ref_ptr<osg::Program> portalProgram = shaderMgr.getProgram("portal");
 
@@ -927,16 +1123,21 @@ namespace MWRender
             quadNode->getOrCreateStateSet()->addUniform(
                 new osg::Uniform("screenRes", osg::Vec2f(float(screenW), float(screenH))));
 
-            portal.portalScene = portalScene;
-            portal.waterSkyTex = waterSkyTex;
+            portal.portalScene = sceneResult.scene;
         }
         catch (const std::exception& e)
         {
             Log(Debug::Warning) << "PortalManager: RTT setup failed (" << e.what() << "); portal will be white";
             if (portal.rttNode && mRttParent)
                 mRttParent->removeChild(portal.rttNode);
-            portal.rttNode     = nullptr;
-            portal.portalScene = nullptr;
+            if (portal.reflectionRTTNode && mRttParent)
+                mRttParent->removeChild(portal.reflectionRTTNode);
+            if (portal.refractionRTTNode && mRttParent)
+                mRttParent->removeChild(portal.refractionRTTNode);
+            portal.rttNode           = nullptr;
+            portal.reflectionRTTNode = nullptr;
+            portal.refractionRTTNode = nullptr;
+            portal.portalScene       = nullptr;
         }
 
         mPortals.push_back(std::move(portal));
@@ -955,6 +1156,10 @@ namespace MWRender
 
             if (it->rttNode && mRttParent)
                 mRttParent->removeChild(it->rttNode);
+            if (it->reflectionRTTNode && mRttParent)
+                mRttParent->removeChild(it->reflectionRTTNode);
+            if (it->refractionRTTNode && mRttParent)
+                mRttParent->removeChild(it->refractionRTTNode);
 
             // Detach the shared mExteriorTerrainNode from the portal scene so the portal's
             // LightManager no longer owns a reference to it. In the no-sky case portalScene IS
@@ -1009,6 +1214,8 @@ namespace MWRender
             if (!portal.destIsExterior || !portal.rttNode)
                 continue;
             portal.rttNode->setClearColor(mExteriorSkyColor);
+
+            // Update sky-color fallback texture for water reflection (used when RTT not ready yet).
             if (portal.waterSkyTex)
             {
                 osg::Image* img = portal.waterSkyTex->getImage();
@@ -1023,6 +1230,15 @@ namespace MWRender
                     img->dirty();
                 }
             }
+
+            // Update sun direction / color live from current weather.
+            if (portal.sunLight)
+            {
+                portal.sunLight->setDiffuse(mExteriorDiffuse);
+                portal.sunLight->setPosition(osg::Vec4f(mExteriorSunDir, 0.f));
+            }
+            if (portal.lightModelAttr)
+                portal.lightModelAttr->setAmbientIntensity(mExteriorAmbient);
         }
 
         // Extract eye position, look, and up from the view matrix.
@@ -1086,22 +1302,24 @@ namespace MWRender
 
                 portal.rttNode->setViewMatrix(portalView);
 
-                // The main camera's near/far is auto-computed for the interior scene (typically
-                // near = 3–10 units). For the exterior portal RTT, objects can be as close as
-                // 1 unit to the RTT camera. Using the interior near clips nearby exterior
-                // geometry, and the resulting depth-buffer range is suboptimal for the exterior,
-                // causing z-fighting between nearly-coplanar surfaces (e.g. thatch and beams).
-                // Use a fixed exterior-friendly projection with the same FOV/aspect as the main
-                // camera but a smaller near (1 unit) and infinite far (reversed-z, no far clip).
+                // Use a fixed exterior-friendly projection: same FOV/aspect as the main camera,
+                // near=1 unit (smaller than interior near to avoid clipping nearby exterior geometry),
+                // infinite far (reversed-z, no far clip).
+                osg::Matrixd rttProj = projMatrix;
                 {
                     double fovY = 0.0, aspect = 0.0, nearP = 0.0, farP = 0.0;
                     if (projMatrix.getPerspective(fovY, aspect, nearP, farP) && fovY > 0.0 && aspect > 0.0)
-                        portal.rttNode->setProjectionMatrix(
-                            SceneUtil::getReversedZProjectionMatrixAsPerspectiveInf(fovY, aspect, 1.0));
-                    else
-                        portal.rttNode->setProjectionMatrix(projMatrix);
+                        rttProj = SceneUtil::getReversedZProjectionMatrixAsPerspectiveInf(fovY, aspect, 1.0);
+                    portal.rttNode->setProjectionMatrix(rttProj);
                 }
 
+                // Propagate the same view/proj to the water reflection and refraction cameras.
+                if (portal.reflectionRTTNode)
+                    static_cast<PortalReflectionRTTNode*>(portal.reflectionRTTNode.get())
+                        ->setMatrices(portalView, rttProj);
+                if (portal.refractionRTTNode)
+                    static_cast<PortalRefractionRTTNode*>(portal.refractionRTTNode.get())
+                        ->setMatrices(portalView, rttProj);
             }
 
             if (portal.cooldown > 0)

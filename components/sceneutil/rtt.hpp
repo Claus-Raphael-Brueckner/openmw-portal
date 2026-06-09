@@ -58,6 +58,9 @@ namespace SceneUtil
         /// Safe to call from any context; returns nullptr if no cull has happened yet.
         osg::Texture* getFirstColorTexture();
 
+        /// Returns the depth texture from the first (primary) view, without requiring a CullVisitor.
+        osg::Texture* getFirstDepthTexture();
+
         osg::Texture* getDepthTexture(osgUtil::CullVisitor* cv);
 
         osg::Camera* getCamera(osgUtil::CullVisitor* cv);

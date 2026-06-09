@@ -14,6 +14,8 @@
 namespace osg
 {
     class Group;
+    class Light;
+    class LightModel;
     class MatrixTransform;
     class Texture2D;
 }
@@ -59,6 +61,12 @@ namespace MWRender
         /// Update the sky clear color for exterior portal RTTs (call each frame with current sky color).
         void setExteriorSkyColor(const osg::Vec4f& color) { mExteriorSkyColor = color; }
 
+        /// Update sun/ambient lighting for exterior portals (call each frame from RenderingManager).
+        void setExteriorLighting(const osg::Vec4f& ambient, const osg::Vec4f& diffuse, const osg::Vec3f& sunDir);
+
+        /// Update the near clip distance used for the water refraction depth linearization.
+        void setNearClip(float v) { mNearClip = v; }
+
         /// Provide the SkyManager so exterior portals can fetch mSkyNode lazily (after sky is created).
         void setSkyManager(SkyManager* sky) { mSkyManager = sky; }
 
@@ -83,9 +91,14 @@ namespace MWRender
             osg::Quat  destRot;      ///< orientation of the arrival point (forward = into dest)
             osg::Vec3f destDoorPos;  ///< world-space center of the actual destination door
             osg::Quat  destDoorRot;  ///< full rotation of the destination door (CellRef * NIF root)
-            osg::ref_ptr<PortalRTTNode> rttNode;    ///< RTT camera node, child of mRttParent
-            osg::ref_ptr<osg::Group>   portalScene; ///< scene group rendered by the RTT camera
-            osg::ref_ptr<osg::Texture2D> waterSkyTex; ///< 1×1 reflection stand-in; updated each frame with sky color
+            osg::ref_ptr<PortalRTTNode>      rttNode;         ///< RTT camera node, child of mRttParent
+            osg::ref_ptr<SceneUtil::RTTNode> reflectionRTTNode; ///< water reflection camera (exterior portals)
+            osg::ref_ptr<SceneUtil::RTTNode> refractionRTTNode; ///< water refraction camera (exterior portals)
+            osg::ref_ptr<osg::Group>         portalScene;     ///< scene group rendered by the RTT camera
+            osg::ref_ptr<osg::Texture2D>     waterSkyTex;     ///< 1×1 reflection stand-in for sky color
+            osg::ref_ptr<osg::Light>         sunLight;        ///< updated each frame with current sun
+            osg::ref_ptr<osg::LightModel>    lightModelAttr;  ///< updated each frame with current ambient
+            float waterHeight = 0.f;
             bool destIsExterior = false;
             bool approachActive = false; ///< ghost mode currently active for this portal
         };
@@ -99,9 +112,13 @@ namespace MWRender
         Resource::ResourceSystem* mResourceSystem;
         osg::Group* mRttParent;           ///< RTT nodes are added here (should outlive PortalManager)
         osg::Group* mExteriorTerrainNode = nullptr; ///< shared terrain root for exterior portals
-        SkyManager* mSkyManager         = nullptr; ///< for lazy getSkyNode() in buildPortalScene
-        SceneUtil::RTTNode* mReflectionRTT = nullptr; ///< main Water reflection RTT for portal water
-        osg::Vec4f  mExteriorSkyColor   = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f);
+        SkyManager* mSkyManager            = nullptr;
+        SceneUtil::RTTNode* mReflectionRTT = nullptr; ///< kept for fallback; superseded by per-portal reflection RTTs
+        osg::Vec4f  mExteriorSkyColor      = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f);
+        osg::Vec4f  mExteriorAmbient       = osg::Vec4f(0.35f, 0.35f, 0.35f, 1.f);
+        osg::Vec4f  mExteriorDiffuse       = osg::Vec4f(0.85f, 0.80f, 0.70f, 1.f);
+        osg::Vec3f  mExteriorSunDir        = osg::Vec3f(0.5f, -0.5f, 1.f);
+        float       mNearClip              = 1.f;
     };
 
 }

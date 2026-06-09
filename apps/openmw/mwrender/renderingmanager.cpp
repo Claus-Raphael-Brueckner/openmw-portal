@@ -455,6 +455,16 @@ namespace MWRender
         updateAmbient();
     }
 
+    void RenderingManager::setWeatherAmbient(const osg::Vec4f& colour)
+    {
+        mWeatherAmbient = colour;
+    }
+
+    void RenderingManager::setWeatherSunColour(const osg::Vec4f& diffuse)
+    {
+        mWeatherSunDiffuse = diffuse;
+    }
+
     int RenderingManager::skyGetMasserPhase() const
     {
         return mSky->getMasserPhase();
@@ -533,6 +543,9 @@ namespace MWRender
         const osg::Vec3f sunlightPos = Settings::shaders().mMatchSunlightToSun ? position : -direction;
         // need to wrap this in a StateUpdater?
         mSunLight->setPosition(osg::Vec4f(sunlightPos, 0.f));
+        // Only called from the exterior weather path (never from configureAmbient), so this
+        // stays valid for portal use even after the player enters an interior cell.
+        mWeatherSunPos = osg::Vec4f(sunlightPos, 0.f);
 
         mSky->setSunDirection(position);
 
@@ -698,6 +711,11 @@ namespace MWRender
         if (!paused && mPortalManager)
         {
             mPortalManager->setExteriorSkyColor(mSky->getSkyColor());
+            mPortalManager->setNearClip(mNearClip);
+            mPortalManager->setExteriorLighting(
+                mWeatherAmbient,
+                mWeatherSunDiffuse,
+                osg::Vec3f(mWeatherSunPos.x(), mWeatherSunPos.y(), mWeatherSunPos.z()));
             const MWWorld::Ptr& player = mPlayerAnimation->getPtr();
             osg::Vec3f playerPos(player.getRefData().getPosition().asVec3());
             mPortalManager->update(playerPos, mViewer->getCamera()->getViewMatrix(),
