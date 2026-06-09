@@ -875,4 +875,9 @@ namespace MWRender
         mShowWorld = show;
     }
 
+    SceneUtil::RTTNode* Water::getReflectionRTT() const
+    {
+        return mReflection.get();
+    }
+
 }

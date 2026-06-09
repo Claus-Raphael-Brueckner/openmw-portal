@@ -15,6 +15,12 @@ namespace osg
 {
     class Group;
     class MatrixTransform;
+    class Texture2D;
+}
+
+namespace SceneUtil
+{
+    class RTTNode;
 }
 
 namespace Resource
@@ -56,6 +62,9 @@ namespace MWRender
         /// Provide the SkyManager so exterior portals can fetch mSkyNode lazily (after sky is created).
         void setSkyManager(SkyManager* sky) { mSkyManager = sky; }
 
+        /// Provide the main Water reflection RTT so portal water uses real sky reflections.
+        void setReflectionRTT(SceneUtil::RTTNode* rtt) { mReflectionRTT = rtt; }
+
         /// Returns true if ptr is a door whose model is handled as a portal surface.
         bool isPortalDoor(const MWWorld::Ptr& door) const;
 
@@ -76,6 +85,7 @@ namespace MWRender
             osg::Quat  destDoorRot;  ///< full rotation of the destination door (CellRef * NIF root)
             osg::ref_ptr<PortalRTTNode> rttNode;    ///< RTT camera node, child of mRttParent
             osg::ref_ptr<osg::Group>   portalScene; ///< scene group rendered by the RTT camera
+            osg::ref_ptr<osg::Texture2D> waterSkyTex; ///< 1×1 reflection stand-in; updated each frame with sky color
             bool destIsExterior = false;
             bool approachActive = false; ///< ghost mode currently active for this portal
         };
@@ -90,8 +100,8 @@ namespace MWRender
         osg::Group* mRttParent;           ///< RTT nodes are added here (should outlive PortalManager)
         osg::Group* mExteriorTerrainNode = nullptr; ///< shared terrain root for exterior portals
         SkyManager* mSkyManager         = nullptr; ///< for lazy getSkyNode() in buildPortalScene
+        SceneUtil::RTTNode* mReflectionRTT = nullptr; ///< main Water reflection RTT for portal water
         osg::Vec4f  mExteriorSkyColor   = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f);
-        int mDebugFrame = 0;
     };
 
 }

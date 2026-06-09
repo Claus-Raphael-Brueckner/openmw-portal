@@ -41,6 +41,11 @@ namespace Fallback
     class Map;
 }
 
+namespace SceneUtil
+{
+    class RTTNode;
+}
+
 namespace MWRender
 {
 
@@ -122,6 +127,9 @@ namespace MWRender
         void processChangedSettings(const Settings::CategorySettingVector& settings);
 
         void showWorld(bool show);
+
+        /// Returns the water reflection RTT node (valid after construction; nullptr if reflections disabled).
+        SceneUtil::RTTNode* getReflectionRTT() const;
     };
 
 }

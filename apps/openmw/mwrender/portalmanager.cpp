@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <sstream>
 #include <stdexcept>
 
@@ -17,6 +16,7 @@
 #include <osg/Geode>
 #include <osg/Geometry>
 #include <osg/Group>
+#include <osg/Image>
 #include <osg/Light>
 #include <osg/LightModel>
 #include <osg/LightSource>
@@ -55,6 +55,8 @@
 #include <components/nifosg/controller.hpp>
 #include <components/resource/imagemanager.hpp>
 #include <components/sceneutil/controller.hpp>
+#include <components/sceneutil/statesetupdater.hpp>
+#include <components/stereo/stereomanager.hpp>
 #include <components/sceneutil/waterutil.hpp>
 #include "renderbin.hpp"
 #include <components/vfs/pathutil.hpp>
@@ -67,63 +69,194 @@
 #include "../mwworld/ptr.hpp"
 
 #include "portalrttnode.hpp"
+#include "ripples.hpp"
 #include "vismask.hpp"
+
+#include <components/sceneutil/rtt.hpp>
 
 namespace MWRender
 {
     namespace
     {
-        // Create a simple animated water node for exterior portal scenes.
-        // Replicates Water::createSimpleWaterStateSet(): base material + animated textures + shader.
-        osg::ref_ptr<osg::PositionAttitudeTransform> createPortalWaterNode(
-            float waterHeight, Resource::ResourceSystem* resourceSystem)
+        // 1×1 RGBA8 texture filled with a constant color.
+        osg::ref_ptr<osg::Texture2D> makeSolidTexture(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
         {
-            const float alpha = Fallback::Map::getFloat("Water_World_Alpha");
+            osg::ref_ptr<osg::Image> img = new osg::Image;
+            img->allocateImage(1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE);
+            unsigned char* d = img->data();
+            d[0] = r; d[1] = g; d[2] = b; d[3] = a;
+            osg::ref_ptr<osg::Texture2D> tex = new osg::Texture2D(img);
+            tex->setFilter(osg::Texture::MIN_FILTER, osg::Texture::NEAREST);
+            tex->setFilter(osg::Texture::MAG_FILTER, osg::Texture::NEAREST);
+            return tex;
+        }
+
+        // CullCallback on the portal water PAT: binds the main Water reflection RTT to unit 1.
+        // Lives on the PAT (parent), not the geometry, so the geometry's own StateSet cannot
+        // override it for unit 1 (geometry's StateSet omits the unit-1 texture binding).
+        class PortalWaterReflectionUpdater : public SceneUtil::StateSetUpdater
+        {
+        public:
+            PortalWaterReflectionUpdater(SceneUtil::RTTNode* reflectionRTT, osg::Texture2D* fallback)
+                : mReflectionRTT(reflectionRTT)
+                , mFallback(fallback)
+            {}
+
+            void setDefaults(osg::StateSet* ss) override
+            {
+                ss->setTextureAttributeAndModes(1, mFallback, osg::StateAttribute::ON);
+            }
+
+            void apply(osg::StateSet* ss, osg::NodeVisitor*) override
+            {
+                osg::Texture* tex = mReflectionRTT ? mReflectionRTT->getFirstColorTexture() : nullptr;
+                ss->setTextureAttributeAndModes(1, tex ? tex : mFallback.get(), osg::StateAttribute::ON);
+            }
+
+        private:
+            osg::ref_ptr<SceneUtil::RTTNode> mReflectionRTT;
+            osg::ref_ptr<osg::Texture2D> mFallback;
+        };
+
+        // Build a water plane for exterior portal scenes.
+        // Tries the full water shader (normal map + Fresnel + specularity) with a sky-colour
+        // stand-in for the reflection map.  Falls back to simple animated water if the shader
+        // cannot be loaded.
+        osg::ref_ptr<osg::PositionAttitudeTransform> createPortalWaterNode(
+            float waterHeight,
+            Resource::ResourceSystem* resourceSystem,
+            Shader::ShaderManager& shaderMgr,
+            const osg::Vec4f& skyColor,
+            osg::ref_ptr<osg::Texture2D>& outSkyTex,
+            SceneUtil::RTTNode* reflectionRTT)
+        {
             osg::ref_ptr<osg::Geometry> waterGeom
                 = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
             waterGeom->setCullingActive(false);
-            waterGeom->setNodeMask(Mask_SimpleWater);
-
-            osg::ref_ptr<osg::StateSet> ss = SceneUtil::createSimpleWaterStateSet(alpha, RenderBin_Water);
-            waterGeom->setStateSet(ss);
-
-            // Load animated water textures (same frames as the main-scene simple water).
-            std::vector<osg::ref_ptr<osg::Texture2D>> textures;
-            const int frameCount = std::clamp(Fallback::Map::getInt("Water_SurfaceFrameCount"), 0, 320);
-            const std::string_view textureName = Fallback::Map::getString("Water_SurfaceTexture");
-            for (int i = 0; i < frameCount; ++i)
-            {
-                std::ostringstream texname;
-                texname << "textures/water/" << textureName
-                        << std::setw(2) << std::setfill('0') << i << ".dds";
-                const VFS::Path::Normalized path(texname.str());
-                try
-                {
-                    osg::ref_ptr<osg::Texture2D> tex(
-                        new osg::Texture2D(resourceSystem->getImageManager()->getImage(path)));
-                    tex->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
-                    tex->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
-                    resourceSystem->getSceneManager()->applyFilterSettings(tex);
-                    textures.push_back(tex);
-                }
-                catch (...) {}
-            }
-
-            if (!textures.empty())
-            {
-                const float fps = Fallback::Map::getFloat("Water_SurfaceFPS");
-                osg::ref_ptr<NifOsg::FlipController> controller(
-                    new NifOsg::FlipController(0, 1.f / fps, textures));
-                controller->setSource(std::make_shared<SceneUtil::FrameTimeSource>());
-                waterGeom->setUpdateCallback(controller);
-                ss->setTextureAttributeAndModes(0, textures[0], osg::StateAttribute::ON);
-                resourceSystem->getSceneManager()->recreateShaders(waterGeom);
-            }
+            waterGeom->setNodeMask(Mask_Water);
 
             osg::ref_ptr<osg::PositionAttitudeTransform> waterNode = new osg::PositionAttitudeTransform;
             waterNode->setPosition(osg::Vec3f(0.f, 0.f, waterHeight));
-            waterNode->setNodeMask(Mask_SimpleWater);
+            waterNode->setNodeMask(Mask_Water);
+            // Disable frustum culling on the PAT: the water geometry has an empty bounding box
+            // (via WaterBoundCallback) to suppress the "huge triangle" cull warning, which makes
+            // the PAT's derived bounding sphere empty too — causing it to be frustum-culled away.
+            waterNode->setCullingActive(false);
             waterNode->addChild(waterGeom);
+
+            bool shaderOk = false;
+            try
+            {
+                Shader::ShaderManager::DefineMap defines;
+                defines["waterRefraction"]     = "0";
+                defines["rainRippleDetail"]    = "0";
+                defines["rippleMapWorldScale"] = std::to_string(MWRender::RipplesSurface::sWorldScaleFactor);
+                defines["rippleMapSize"]       = std::to_string(MWRender::RipplesSurface::sRTTSize) + ".0";
+                defines["sunlightScattering"]  = Settings::water().mSunlightScattering ? "1" : "0";
+                defines["wobblyShores"]        = "0";
+                Stereo::shaderStereoDefines(defines);
+
+                osg::ref_ptr<osg::Program> program = shaderMgr.getProgram("water", defines);
+
+                constexpr VFS::Path::NormalizedView waterNM("textures/omw/water_nm.png");
+                osg::ref_ptr<osg::Texture2D> normalMap(
+                    new osg::Texture2D(resourceSystem->getImageManager()->getImage(waterNM)));
+                normalMap->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+                normalMap->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+                resourceSystem->getSceneManager()->applyFilterSettings(normalMap);
+
+                // Water reflects overhead sky, which is ~40% of the horizon clear-color.
+                // Using the raw sky color directly produces water that is far too bright.
+                constexpr float kReflectionScale = 0.4f;
+                osg::ref_ptr<osg::Texture2D> skyTex = makeSolidTexture(
+                    static_cast<unsigned char>(std::clamp(skyColor.r() * kReflectionScale, 0.f, 1.f) * 255.f),
+                    static_cast<unsigned char>(std::clamp(skyColor.g() * kReflectionScale, 0.f, 1.f) * 255.f),
+                    static_cast<unsigned char>(std::clamp(skyColor.b() * kReflectionScale, 0.f, 1.f) * 255.f), 255);
+
+                osg::ref_ptr<osg::Texture2D> rippleDummy = makeSolidTexture(128, 128, 0, 0);
+
+                // Set the water shader StateSet directly on the geometry node — same pattern as
+                // simple water (setStateSet on mWaterGeom) and confirmed to reach the render leaf.
+                // Using setStateSet avoids StateSetUpdater push/pop ordering issues and bounding-sphere
+                // culling of the PAT when the geometry reports an empty bounding box.
+                osg::ref_ptr<osg::StateSet> ss = new osg::StateSet;
+                ss->setAttributeAndModes(program, osg::StateAttribute::ON);
+                ss->setMode(GL_CULL_FACE, osg::StateAttribute::OFF);
+                // Water at sea level (z≈-1) is below the destination door (z≈268).
+                // The portal clip plane passes through the door and clips the water plane,
+                // removing exactly the visible portion. Water is always in the exterior so
+                // clipping it is wrong — disable GL_CLIP_PLANE0 for this geometry.
+                ss->setMode(GL_CLIP_PLANE0, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+                // Render opaque: portal.frag forces alpha=1 anyway, and the shader outputs
+                // near-zero alpha at steep viewing angles (low Fresnel), hiding the surface.
+                ss->setMode(GL_BLEND, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+                osg::ref_ptr<osg::Depth> depth = new SceneUtil::AutoDepth;
+                depth->setWriteMask(true);
+                ss->setAttributeAndModes(depth, osg::StateAttribute::ON);
+                ss->setRenderBinDetails(RenderBin_Default, "RenderBin");
+
+                ss->addUniform(new osg::Uniform("normalMap",     0));
+                ss->setTextureAttributeAndModes(0, normalMap,    osg::StateAttribute::ON);
+                ss->addUniform(new osg::Uniform("reflectionMap", 1));
+                // Unit 1 texture is NOT bound here — PortalWaterReflectionUpdater on the PAT
+                // provides it each frame from the main Water reflection RTT (or skyTex fallback).
+                ss->addUniform(new osg::Uniform("rippleMap",     4));
+                ss->setTextureAttributeAndModes(4, rippleDummy,  osg::StateAttribute::ON);
+
+                ss->addUniform(new osg::Uniform("nodePosition",  osg::Vec3f(0.f, 0.f, waterHeight)));
+                ss->addUniform(new osg::Uniform("playerPos",     osg::Vec3f(0.f, 0.f, 0.f)));
+                ss->addUniform(new osg::Uniform("rainIntensity", 0.f));
+
+                waterGeom->setStateSet(ss);
+                // Reflection texture is on the PAT so it can be updated each frame without the
+                // geometry's own StateSet (applied later, higher priority) overriding it.
+                waterNode->addCullCallback(new PortalWaterReflectionUpdater(reflectionRTT, skyTex.get()));
+                outSkyTex = skyTex;
+                shaderOk = true;
+            }
+            catch (...) {}
+
+            if (!shaderOk)
+            {
+                // Fallback: simple animated water.
+                waterGeom->setNodeMask(Mask_SimpleWater);
+                waterNode->setNodeMask(Mask_SimpleWater);
+                const float alpha = Fallback::Map::getFloat("Water_World_Alpha");
+                osg::ref_ptr<osg::StateSet> ss = SceneUtil::createSimpleWaterStateSet(alpha, RenderBin_Water);
+                waterGeom->setStateSet(ss);
+
+                std::vector<osg::ref_ptr<osg::Texture2D>> textures;
+                const int frameCount = std::clamp(Fallback::Map::getInt("Water_SurfaceFrameCount"), 0, 320);
+                const std::string_view textureName = Fallback::Map::getString("Water_SurfaceTexture");
+                for (int i = 0; i < frameCount; ++i)
+                {
+                    std::ostringstream texname;
+                    texname << "textures/water/" << textureName
+                            << std::setw(2) << std::setfill('0') << i << ".dds";
+                    try
+                    {
+                        osg::ref_ptr<osg::Texture2D> tex(
+                            new osg::Texture2D(resourceSystem->getImageManager()->getImage(
+                                VFS::Path::Normalized(texname.str()))));
+                        tex->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+                        tex->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+                        resourceSystem->getSceneManager()->applyFilterSettings(tex);
+                        textures.push_back(tex);
+                    }
+                    catch (...) {}
+                }
+                if (!textures.empty())
+                {
+                    const float fps = Fallback::Map::getFloat("Water_SurfaceFPS");
+                    osg::ref_ptr<NifOsg::FlipController> ctrl(
+                        new NifOsg::FlipController(0, 1.f / fps, textures));
+                    ctrl->setSource(std::make_shared<SceneUtil::FrameTimeSource>());
+                    waterGeom->setUpdateCallback(ctrl);
+                    ss->setTextureAttributeAndModes(0, textures[0], osg::StateAttribute::ON);
+                    resourceSystem->getSceneManager()->recreateShaders(waterGeom);
+                }
+            }
+
             return waterNode;
         }
 
@@ -256,14 +389,6 @@ namespace MWRender
             if (!cellStore)
                 return group;
 
-            const int nStatics    = static_cast<int>(cellStore->getReadOnlyStatics().mList.size());
-            const int nDoors      = static_cast<int>(cellStore->getReadOnlyDoors().mList.size());
-            const int nContainers = static_cast<int>(cellStore->getReadOnlyContainers().mList.size());
-            const int nActivators = static_cast<int>(cellStore->getReadOnlyActivators().mList.size());
-            const int nLights     = static_cast<int>(cellStore->getReadOnlyLights().mList.size());
-            Log(Debug::Info) << "PortalScene: statics=" << nStatics << " doors=" << nDoors
-                << " containers=" << nContainers << " activators=" << nActivators << " lights=" << nLights;
-
             const float maxDistSq = maxDist * maxDist;
 
             auto addRefs = [&](auto& refList)
@@ -342,7 +467,10 @@ namespace MWRender
             const osg::Vec3f& destCenter,
             Resource::ResourceSystem* resourceSystem,
             osg::Group* exteriorTerrainNode,
-            SkyManager* skyManager)
+            SkyManager* skyManager,
+            const osg::Vec4f& skyColor = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f),
+            osg::ref_ptr<osg::Texture2D>* outWaterSkyTex = nullptr,
+            SceneUtil::RTTNode* reflectionRTT = nullptr)
         {
             constexpr float kMaxDist = 5000.f;
             osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, kMaxDist);
@@ -484,8 +612,16 @@ namespace MWRender
                     lightManager->addChild(exteriorTerrainNode);
 
                 if (cellStore->getCell()->hasWater())
-                    lightManager->addChild(createPortalWaterNode(
-                        cellStore->getCell()->getWaterHeight(), resourceSystem));
+                {
+                    osg::ref_ptr<osg::Texture2D> waterSkyTex;
+                    osg::ref_ptr<osg::PositionAttitudeTransform> wn = createPortalWaterNode(
+                        cellStore->getCell()->getWaterHeight(), resourceSystem,
+                        resourceSystem->getSceneManager()->getShaderManager(),
+                        skyColor, waterSkyTex, reflectionRTT);
+                    if (outWaterSkyTex)
+                        *outWaterSkyTex = waterSkyTex;
+                    lightManager->addChild(wn);
+                }
             }
 
             return lightManager;
@@ -740,13 +876,9 @@ namespace MWRender
                 }
             }
 
-            Log(Debug::Info) << "PortalScene: destCellId=" << destCellId
-                << " destCellStore=" << (destCellStore ? "found" : "NULL")
-                << " center=(" << portal.destDoorPos.x() << "," << portal.destDoorPos.y()
-                << "," << portal.destDoorPos.z() << ")";
-
+            osg::ref_ptr<osg::Texture2D> waterSkyTex;
             osg::ref_ptr<osg::Group> portalScene
-                = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode, mSkyManager);
+                = buildPortalScene(destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode, mSkyManager, mExteriorSkyColor, &waterSkyTex, mReflectionRTT);
 
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
@@ -796,6 +928,7 @@ namespace MWRender
                 new osg::Uniform("screenRes", osg::Vec2f(float(screenW), float(screenH))));
 
             portal.portalScene = portalScene;
+            portal.waterSkyTex = waterSkyTex;
         }
         catch (const std::exception& e)
         {
@@ -872,8 +1005,25 @@ namespace MWRender
             return;
 
         for (auto& portal : mPortals)
-            if (portal.destIsExterior && portal.rttNode)
-                portal.rttNode->setClearColor(mExteriorSkyColor);
+        {
+            if (!portal.destIsExterior || !portal.rttNode)
+                continue;
+            portal.rttNode->setClearColor(mExteriorSkyColor);
+            if (portal.waterSkyTex)
+            {
+                osg::Image* img = portal.waterSkyTex->getImage();
+                if (img)
+                {
+                    constexpr float kReflectionScale = 0.4f;
+                    unsigned char* d = img->data();
+                    d[0] = static_cast<unsigned char>(std::clamp(mExteriorSkyColor.r() * kReflectionScale, 0.f, 1.f) * 255.f);
+                    d[1] = static_cast<unsigned char>(std::clamp(mExteriorSkyColor.g() * kReflectionScale, 0.f, 1.f) * 255.f);
+                    d[2] = static_cast<unsigned char>(std::clamp(mExteriorSkyColor.b() * kReflectionScale, 0.f, 1.f) * 255.f);
+                    d[3] = 255;
+                    img->dirty();
+                }
+            }
+        }
 
         // Extract eye position, look, and up from the view matrix.
         // Eye position: view matrix M transforms world→eye. Camera origin = -R^T * t
@@ -890,28 +1040,6 @@ namespace MWRender
             static_cast<float>(viewMatrix(0, 1)),
             static_cast<float>(viewMatrix(1, 1)),
             static_cast<float>(viewMatrix(2, 1)));
-
-        ++mDebugFrame;
-
-        // Always write current player position + look to /tmp/player_pos.txt so it can
-        // be read from a terminal (watch -n0.5 cat /tmp/player_pos.txt) at any time.
-        if (mDebugFrame % 8 == 0)
-        {
-            std::ofstream pf("/tmp/player_pos.txt", std::ios::trunc);
-            if (pf.is_open())
-                pf << "playerPos  " << playerPos.x()   << " " << playerPos.y()   << " " << playerPos.z()   << "\n"
-                   << "playerLook " << playerLook.x()  << " " << playerLook.y()  << " " << playerLook.z()  << "\n";
-        }
-
-        // Find the nearest RTT portal for debug output.
-        std::size_t nearestIdx = 0;
-        float nearestDist = std::numeric_limits<float>::max();
-        for (std::size_t j = 0; j < mPortals.size(); ++j)
-        {
-            if (!mPortals[j].rttNode) continue;
-            const float d = (playerPos - mPortals[j].planePoint).length();
-            if (d < nearestDist) { nearestDist = d; nearestIdx = j; }
-        }
 
         for (std::size_t i = 0; i < mPortals.size(); ++i)
         {
@@ -955,18 +1083,6 @@ namespace MWRender
                     osg::Vec3d(camPos),
                     osg::Vec3d(camPos + rttLook * 400.f),
                     osg::Vec3d(rttUp));
-
-                if (i == nearestIdx && mDebugFrame % 15 == 0)
-                {
-                    std::ofstream out("/tmp/portal_0.txt", std::ios::trunc);
-                    if (out.is_open())
-                        out << "camPos   " << camPos.x() << " " << camPos.y() << " " << camPos.z() << "\n"
-                            << "# local  " << local.x()  << " " << local.y()  << " " << local.z()  << "\n"
-                            << "# lyAbs  " << lyAbs << "\n"
-                            << "# destDoorPos " << portal.destDoorPos.x() << " " << portal.destDoorPos.y() << " " << portal.destDoorPos.z() << "\n"
-                            << "# destFwd     " << forward.x() << " " << forward.y() << " " << forward.z() << "\n"
-                            << "# playerLook  " << playerLook.x() << " " << playerLook.y() << " " << playerLook.z() << "\n";
-                }
 
                 portal.rttNode->setViewMatrix(portalView);
 
