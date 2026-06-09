@@ -826,6 +826,7 @@ namespace MWRender
             "in_hlaalu_door.nif",
             "ex_velothi_loaddoor_01.nif",
             "in_velothismall_ndoor_01.nif",
+            "ex_common_door_balcony.nif",
         };
         for (const auto& pattern : sPortalModels)
             if (model.find(pattern) != std::string::npos)
@@ -967,7 +968,15 @@ namespace MWRender
         // setNodeRotation() will apply CellRef rotation to the PAT after this call returns.
         const osg::Quat cellRefRot = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
         const osg::Quat fullRot = cellRefRot * nifRootQuat;
-        const osg::Vec3f normal = fullRot * osg::Vec3f(0.f, -1.f, 0.f);
+        osg::Vec3f normal = fullRot * osg::Vec3f(0.f, -1.f, 0.f);
+        // Force the trigger plane to be vertical: strip any Z component that a non-standard
+        // NIF root rotation might introduce (e.g. ex_common_door_balcony.nif). Without this,
+        // the crossing check fires on height rather than horizontal position.
+        normal.z() = 0.f;
+        if (normal.length2() > 1e-6f)
+            normal.normalize();
+        else
+            normal = osg::Vec3f(0.f, 1.f, 0.f);
         const osg::Vec3f pos = door.getRefData().getPosition().asVec3();
 
         const osg::Vec3f playerPos
@@ -1043,6 +1052,38 @@ namespace MWRender
                     }
                     portal.destDoorPos = dPos.asVec3();
                     portal.destDoorRot = destCellRefRot * destNifRootQuat;
+                }
+
+                // Verify that the back-door's forward direction (destDoorRot * -Y) points INTO the
+                // destination scene, i.e. toward the player spawn point.  Some NIF models bake a
+                // 180° rotation so their local -Y faces outward instead of inward; in those cases
+                // the RTT camera ends up on the wrong side of the door.  Detect by comparing with
+                // the door→spawn direction, snapped to the nearest cardinal axis.  Morrowind doors
+                // sit on an axis-aligned grid so the spawn is always predominantly ±X or ±Y from
+                // the door — snapping avoids false negatives from small diagonal offsets and works
+                // even when the spawn is only a few units from the door.
+                if (bestDistSq < std::numeric_limits<float>::max())
+                {
+                    const osg::Vec3f spawnOffset = portal.destPoint - portal.destDoorPos;
+                    const float spawnDistXY2 = spawnOffset.x() * spawnOffset.x()
+                                             + spawnOffset.y() * spawnOffset.y();
+                    if (spawnDistXY2 > 25.f)  // at least 5 units in XY
+                    {
+                        const osg::Vec3f snappedDir =
+                            (std::abs(spawnOffset.x()) >= std::abs(spawnOffset.y()))
+                            ? osg::Vec3f(spawnOffset.x() > 0.f ? 1.f : -1.f, 0.f, 0.f)
+                            : osg::Vec3f(0.f, spawnOffset.y() > 0.f ? 1.f : -1.f, 0.f);
+
+                        osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
+                        destFwd.z() = 0.f;
+                        if (destFwd.length2() > 1e-6f)
+                        {
+                            destFwd.normalize();
+                            if (destFwd * snappedDir < 0.f)
+                                portal.destDoorRot = portal.destDoorRot
+                                    * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f));
+                        }
+                    }
                 }
             }
 
@@ -1266,34 +1307,29 @@ namespace MWRender
             if (portal.rttNode)
             {
                 const osg::Vec3f diff  = eyePos - portal.planePoint;
+
+                // Map the player's offset relative to the source door into destination space.
+                // portal.invRot = (cellRefRot * nifRootQuat).inverse() for the source door.
+                // local.y < 0 means the player is in front of the source door.
                 const osg::Vec3f local = portal.invRot * diff;
-                // Clamp local.y away from zero so the camera never clips through the portal.
-                // For outdoor portal local.y < 0 (player in front); for indoor local.y > 0.
                 const float ly = (local.y() < 0.f)
                     ? std::min(local.y(), -10.f)
                     : std::max(local.y(),  10.f);
+                const float lyAbs = std::abs(ly);
 
                 const osg::Vec3f forward = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
                 const osg::Vec3f right   = portal.destDoorRot * osg::Vec3f(1.f,  0.f, 0.f);
                 const osg::Vec3f upVec   = portal.destDoorRot * osg::Vec3f(0.f,  0.f, 1.f);
-
-                const float lyAbs = std::abs(ly);
 
                 const osg::Vec3f camPos = portal.destDoorPos
                     - forward * lyAbs
                     - right   * local.x()
                     + upVec   * local.z();
 
-                // RTT camera mirrors the player's lateral look angle through the portal.
-                // Source and destination doors may have opposite local-y conventions, so we
-                // take x/z (lateral) from the transformed player look but force y = -1
-                // (destination convention: local -y = into cave), mirroring how the position
-                // formula uses lyAbs to always displace the camera in the forward direction.
-                // Both doors use local -y = forward but face opposite world directions.
-                // Flip x (mirror) and y (opposite facing), keep z: 180-deg rotation around portal Z.
+                // Mirror the player look direction through the portal.
                 const osg::Vec3f srcLocal = portal.invRot * playerLook;
-                const osg::Vec3f rttLook = portal.destDoorRot * osg::Vec3f(-srcLocal.x(), -srcLocal.y(), srcLocal.z());
-                // Fixed portal up avoids gimbal lock when rttLook approaches world-up.
+                const osg::Vec3f rttLook
+                    = portal.destDoorRot * osg::Vec3f(-srcLocal.x(), -srcLocal.y(), srcLocal.z());
                 const osg::Vec3f rttUp = upVec;
                 const osg::Matrixd portalView = osg::Matrix::lookAt(
                     osg::Vec3d(camPos),
@@ -1363,7 +1399,7 @@ namespace MWRender
                     // Floor box: 300×300, 10 units thick, placed 5 units below the door base.
                     const float floorZ = portal.planePoint.z() - portal.halfExtents.y() - 5.f;
                     const osg::Vec3f floorCenter(portal.planePoint.x(), portal.planePoint.y(), floorZ);
-                    world->addPortalFloor(floorCenter, 150.f, 150.f);
+                    world->addPortalFloor(floorCenter, 300.f, 300.f);
                     // Two angled guide walls funnelling the player toward the portal opening.
                     world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
                         portal.halfExtents.x(), portal.halfExtents.y());
