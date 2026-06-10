@@ -678,6 +678,8 @@ namespace MWWorld
 
         MWRender::RenderingManager* getRenderingManager() override { return mRendering.get(); }
 
+        void notifyDoorLockChanged(const MWWorld::Ptr& door) override;
+
         MWRender::PostProcessor* getPostProcessor() override;
 
         DateTimeManager* getTimeManager() override { return mTimeManager.get(); }

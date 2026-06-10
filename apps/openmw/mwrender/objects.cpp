@@ -102,6 +102,33 @@ namespace MWRender
         mObjects.emplace(ptr.mRef, std::move(anim));
     }
 
+    void Objects::onDoorLockChanged(const MWWorld::Ptr& ptr, bool becamePortal)
+    {
+        if (becamePortal)
+            return; // mesh already cleared by tryCreatePortal; existing animation unchanged
+
+        // Door became locked: reload its mesh into the existing animation (keeps CharacterController valid).
+        auto it = mObjects.find(ptr.mRef);
+        if (it == mObjects.end())
+            return;
+
+        auto* anim = dynamic_cast<ObjectAnimation*>(it->second.get());
+        if (!anim)
+            return;
+
+        std::string mesh = std::string(ptr.getClass().getCorrectedModel(ptr));
+        bool animated = ptr.getClass().useAnim();
+        if (animated && !mesh.empty())
+        {
+            std::string animMesh = Misc::ResourceHelpers::correctActorModelPath(
+                VFS::Path::toNormalized(mesh), mResourceSystem->getVFS());
+            if (animMesh == mesh && Misc::StringUtils::ciEndsWith(animMesh, ".nif"))
+                animated = false;
+        }
+        anim->reloadMesh(mesh, animated);
+        ptr.getRefData().getBaseNode()->setNodeMask(Mask_Object);
+    }
+
     void Objects::insertCreature(const MWWorld::Ptr& ptr, const std::string& mesh, bool weaponsShields)
     {
         insertBegin(ptr);
@@ -193,6 +220,10 @@ namespace MWRender
                         ptr.getClass().getInventoryStore(ptr).setInvListener(nullptr);
                     ptr.getClass().getContainerStore(ptr).setContListener(nullptr);
                 }
+
+                // Destroy any portal for this door before its LiveCellRef becomes invalid.
+                if (mPortalManager && ptr.getClass().isDoor())
+                    mPortalManager->destroyPortal(ptr);
 
                 iter->second->removeFromScene();
                 mUnrefQueue.push(std::move(iter->second));

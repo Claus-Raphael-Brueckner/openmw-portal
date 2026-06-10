@@ -7,6 +7,9 @@
 
 #include "apps/openmw/mwworld/esmstore.hpp"
 
+#include "apps/openmw/mwbase/environment.hpp"
+#include "apps/openmw/mwbase/world.hpp"
+
 namespace MWLua
 {
 
@@ -34,6 +37,7 @@ namespace MWLua
                 level = object.ptr().getCellRef().getLockLevel();
 
             object.ptr().getCellRef().setLockLevel(level);
+            MWBase::Environment::get().getWorld()->notifyDoorLockChanged(object.ptr());
         };
         lockable["unlock"] = [](const GObject& object) {
             if (!object.ptr().getCellRef().isLocked())
@@ -41,6 +45,7 @@ namespace MWLua
             object.ptr().getCellRef().setLocked(false);
 
             object.ptr().getCellRef().setLockLevel(-object.ptr().getCellRef().getLockLevel());
+            MWBase::Environment::get().getWorld()->notifyDoorLockChanged(object.ptr());
         };
         lockable["setTrapSpell"] = [](const GObject& object, const sol::object& spellOrId) {
             if (spellOrId == sol::nil)

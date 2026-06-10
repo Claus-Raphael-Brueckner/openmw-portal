@@ -3808,6 +3808,34 @@ namespace MWWorld
         return mRendering->getPostProcessor();
     }
 
+    void World::notifyDoorLockChanged(const MWWorld::Ptr& door)
+    {
+        if (!mRendering)
+            return;
+        auto [hadPortal, nowPortal] = mRendering->notifyDoorLockChanged(door);
+
+        if (hadPortal && !nowPortal)
+        {
+            // Portal door was locked: add physics so the player can no longer walk through.
+            // Guard: insertObject asserts the object is not already present in the physics world.
+            if (!mPhysics->getObject(door))
+            {
+                std::string model = door.getClass().getCorrectedModel(door);
+                if (!model.empty())
+                {
+                    const osg::Quat rotation = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
+                    door.getClass().insertObject(door, model, rotation, *mPhysics);
+                }
+            }
+        }
+        else if (!hadPortal && nowPortal)
+        {
+            // Door became an active portal: remove its physics so the player can walk through.
+            if (mPhysics->getObject(door))
+                mPhysics->remove(door);
+        }
+    }
+
     void World::setActorActive(const MWWorld::Ptr& ptr, bool value)
     {
         if (MWPhysics::Actor* const actor = mPhysics->getActor(ptr))

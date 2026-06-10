@@ -606,6 +606,9 @@ namespace MWBase
 
         virtual MWRender::RenderingManager* getRenderingManager() = 0;
 
+        /// Notify the portal renderer that a door's lock state has changed.
+        virtual void notifyDoorLockChanged(const MWWorld::Ptr& door) = 0;
+
         virtual MWRender::PostProcessor* getPostProcessor() = 0;
 
         virtual MWWorld::DateTimeManager* getTimeManager() = 0;

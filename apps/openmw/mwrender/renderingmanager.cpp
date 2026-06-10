@@ -798,6 +798,17 @@ namespace MWRender
         return mPortalManager && mPortalManager->isPortalDoor(ptr);
     }
 
+    RenderingManager::PortalStateChange RenderingManager::notifyDoorLockChanged(const MWWorld::Ptr& ptr)
+    {
+        if (!mPortalManager)
+            return {false, false};
+        bool hadPortal = mPortalManager->destroyPortal(ptr);
+        bool nowPortal = mPortalManager->tryCreatePortal(ptr);
+        if (hadPortal || nowPortal)
+            mObjects->onDoorLockChanged(ptr, nowPortal);
+        return {hadPortal, nowPortal};
+    }
+
     void RenderingManager::setWaterEnabled(bool enabled)
     {
         mWater->setEnabled(enabled);

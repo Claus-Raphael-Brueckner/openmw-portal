@@ -63,6 +63,7 @@ namespace MWMechanics
             if (Misc::Rng::roll0to99(prng) <= x)
             {
                 lock.getCellRef().unlock();
+                MWBase::Environment::get().getWorld()->notifyDoorLockChanged(lock);
                 resultMessage = "#{sLockSuccess}";
                 resultSound = "Open Lock";
                 mActor.getClass().skillUsageSucceeded(mActor, ESM::Skill::Security, ESM::Skill::Security_PickLock);

@@ -10,6 +10,7 @@
 #include <osg/ref_ptr>
 
 #include "../mwworld/ptr.hpp"
+#include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
 
 namespace osg
@@ -50,7 +51,8 @@ namespace MWRender
         bool tryCreatePortal(const MWWorld::Ptr& door);
 
         /// Called from Objects::removeObject. Removes portal data for the door if it exists.
-        void destroyPortal(const MWWorld::Ptr& door);
+        /// Returns true if a portal was actually found and removed.
+        bool destroyPortal(const MWWorld::Ptr& door);
 
         /// Called every frame. Checks whether the player has crossed any portal plane and
         /// triggers teleportation. Only runs when not paused.
@@ -89,9 +91,10 @@ namespace MWRender
             osg::Vec2f halfExtents;  ///< half-width (X) and half-height (Z) of the opening
             bool lastSide = true;    ///< which side of the plane the player was on last frame
             int cooldown = 0;        ///< frames to wait; prevents immediate re-trigger
-            ESM::RefId destCellId;   ///< cached dest cell id (avoid re-dereferencing door Ptr later)
-            osg::Vec3f destPoint;    ///< world-space arrival position in the destination cell
-            osg::Quat  destRot;      ///< orientation of the arrival point (forward = into dest)
+            ESM::RefId   destCellId; ///< cached dest cell id (avoid re-dereferencing door Ptr later)
+            ESM::Position destPos;  ///< cached door destination (position + rotation) for cell change
+            osg::Vec3f destPoint;   ///< world-space arrival position in the destination cell
+            osg::Quat  destRot;     ///< orientation of the arrival point (forward = into dest)
             osg::Vec3f destDoorPos;  ///< world-space center of the actual destination door
             osg::Quat  destDoorRot;  ///< full rotation of the destination door (CellRef * NIF root)
             osg::ref_ptr<PortalRTTNode>      rttNode;         ///< RTT camera node, child of mRttParent

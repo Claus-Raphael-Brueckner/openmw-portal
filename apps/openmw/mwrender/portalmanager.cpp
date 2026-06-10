@@ -839,6 +839,8 @@ namespace MWRender
     {
         if (!door.getCellRef().getTeleport())
             return false;
+        if (door.getCellRef().isLocked())
+            return false;
         const auto* base = door.get<ESM::Door>()->mBase;
         if (!base)
             return false;
@@ -943,6 +945,9 @@ namespace MWRender
         if (!isPortalDoor(door))
             return false;
 
+        if (door.getCellRef().isLocked())
+            return false;
+
         // Only create portals for genuine exterior↔interior transitions.
         // ex_cave_door_01 / in_cave_door_01 can also appear as interior→interior connectors
         // (deeper cave rooms). Those must not become portals — their destCell is the same
@@ -1000,6 +1005,9 @@ namespace MWRender
                 localOffset = cellRefRot.inverse() * osg::Vec3f(halfExtents.x(), 0.f, halfExtents.y());
         }
         osg::ref_ptr<osg::MatrixTransform> quadNode = buildQuadNode(halfExtents, nifRootQuat, localOffset);
+        // Clear any previously loaded door mesh children (happens when a locked door is unlocked
+        // at runtime: Objects loaded the normal mesh, now we replace it with the portal quad).
+        baseNode->removeChildren(0, baseNode->getNumChildren());
         baseNode->addChild(quadNode);
 
         // World-space portal plane normal = CellRef rotation * NIF root rotation * (-Y).
@@ -1033,6 +1041,7 @@ namespace MWRender
             const ESM::RefId destCellId = door.getCellRef().getDestCell();
             portal.destCellId = destCellId;
             const ESM::Position destPos = door.getCellRef().getDoorDest();
+            portal.destPos   = destPos;
             portal.destPoint = destPos.asVec3();
             portal.destRot   = Misc::Convert::makeOsgQuat(destPos);
             portal.destDoorPos = portal.destPoint;
@@ -1125,7 +1134,7 @@ namespace MWRender
         return true;
     }
 
-    void PortalManager::destroyPortal(const MWWorld::Ptr& door)
+    bool PortalManager::destroyPortal(const MWWorld::Ptr& door)
     {
         auto it = std::find_if(mPortals.begin(), mPortals.end(),
             [&door](const Portal& p) { return p.door.mRef == door.mRef; });
@@ -1135,8 +1144,18 @@ namespace MWRender
             // while physics state is in flux; calling setCollisionFilterMask then crashes.
             // mGhostModeActive stays true so update() cleans up on the next stable frame.
             teardownPortalRTT(*it);
+            // Explicitly detach quadNode from the scene graph. Copy the parent list first —
+            // removeChild modifies getParents() in-place, invalidating iteration.
+            if (it->quadNode)
+            {
+                osg::Node::ParentList parents = it->quadNode->getParents();
+                for (auto* parent : parents)
+                    parent->removeChild(it->quadNode);
+            }
             mPortals.erase(it);
+            return true;
         }
+        return false;
     }
 
     void PortalManager::setupPortalRTT(Portal& portal)
@@ -1514,8 +1533,10 @@ namespace MWRender
                     world->removePortalFloor();
                     world->removePortalGuideWalls();
                 }
-                const ESM::RefId destCell = portal.door.getCellRef().getDestCell();
-                const ESM::Position destPos = portal.door.getCellRef().getDoorDest();
+                // Use cached values — never re-dereference portal.door here; its CellRef
+                // may be stale if a lock/unlock cycle occurred since the portal was created.
+                const ESM::RefId&   destCell = portal.destCellId;
+                const ESM::Position destPos  = portal.destPos;
                 // changeToCell is synchronous; may call destroyPortal invalidating mPortals.
                 MWBase::Environment::get().getWorld()->changeToCell(destCell, destPos, true, true, true);
                 return;

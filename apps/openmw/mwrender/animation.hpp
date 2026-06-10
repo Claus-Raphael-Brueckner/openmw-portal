@@ -503,6 +503,9 @@ namespace MWRender
         ObjectAnimation(const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem,
             bool animated, bool allowLight);
 
+        /// Swap in a new mesh without replacing the ObjectAnimation object (keeps CharacterController pointer valid).
+        void reloadMesh(const std::string& model, bool animated);
+
         bool canBeHarvested() const override;
         void harvest(const MWWorld::Ptr& ptr) override;
     };

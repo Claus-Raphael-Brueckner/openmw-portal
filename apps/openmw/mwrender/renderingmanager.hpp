@@ -168,6 +168,14 @@ namespace MWRender
         /// Returns true if ptr is a portal door (physics should not be added for it).
         bool isPortalDoor(const MWWorld::Ptr& ptr) const;
 
+        struct PortalStateChange
+        {
+            bool hadPortal; ///< A portal existed for this door before the call.
+            bool nowPortal; ///< A portal exists for this door after the call.
+        };
+        /// Called when a door's lock state changes; destroys and recreates the portal if applicable.
+        PortalStateChange notifyDoorLockChanged(const MWWorld::Ptr& ptr);
+
         void setWaterEnabled(bool enabled);
         void setWaterHeight(float level);
 

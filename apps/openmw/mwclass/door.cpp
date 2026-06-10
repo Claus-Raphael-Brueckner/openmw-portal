@@ -160,6 +160,7 @@ namespace MWClass
             if (actor == MWMechanics::getPlayer())
                 MWBase::Environment::get().getWindowManager()->messageBox(std::string{ keyName } + " #{sKeyUsed}");
             ptr.getCellRef().unlock(); // Call the function here. because that makes sense.
+            MWBase::Environment::get().getWorld()->notifyDoorLockChanged(ptr);
             // using a key disarms the trap
             if (isTrapped)
             {

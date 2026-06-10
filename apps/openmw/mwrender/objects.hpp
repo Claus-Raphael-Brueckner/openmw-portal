@@ -89,6 +89,10 @@ namespace MWRender
         bool removeObject(const MWWorld::Ptr& ptr);
         ///< \return found?
 
+        /// Called when a door's lock state changes at runtime (not during initial cell load).
+        /// Swaps the ObjectAnimation: empty for portal state, full mesh for locked state.
+        void onDoorLockChanged(const MWWorld::Ptr& ptr, bool becamePortal);
+
         void removeCell(const MWWorld::CellStore* store);
 
         /// Updates containing cell for object rendering data

@@ -386,6 +386,7 @@ namespace MWScript
                 }
 
                 ptr.getCellRef().lock(lockLevel);
+                MWBase::Environment::get().getWorld()->notifyDoorLockChanged(ptr);
 
                 // Instantly reset door to closed state
                 // This is done when using Lock in scripts, but not when using Lock spells.
@@ -404,7 +405,10 @@ namespace MWScript
             {
                 MWWorld::Ptr ptr = R()(runtime);
                 if (ptr.getCellRef().isLocked())
+                {
                     ptr.getCellRef().unlock();
+                    MWBase::Environment::get().getWorld()->notifyDoorLockChanged(ptr);
+                }
             }
         };
 

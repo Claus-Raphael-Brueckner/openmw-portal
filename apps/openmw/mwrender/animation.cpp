@@ -1558,7 +1558,8 @@ namespace MWRender
             if (mTransparencyUpdater)
                 mObjectRoot->removeCullCallback(mTransparencyUpdater);
             previousStateset = mObjectRoot->getStateSet();
-            mObjectRoot->getParent(0)->removeChild(mObjectRoot);
+            if (mObjectRoot->getNumParents() > 0)
+                mObjectRoot->getParent(0)->removeChild(mObjectRoot);
         }
         mObjectRoot = nullptr;
         mSkeleton = nullptr;
@@ -2103,6 +2104,20 @@ namespace MWRender
         {
             harvest(ptr);
         }
+    }
+
+    void ObjectAnimation::reloadMesh(const std::string& model, bool animated)
+    {
+        if (model.empty())
+            return;
+        setObjectRoot(model, false, false, false);
+        if (!mObjectRoot)
+            return;
+        if (animated)
+            addAnimSource(model, model);
+        if (!mPtr.getClass().getEnchantment(mPtr).empty())
+            mGlowUpdater = SceneUtil::addEnchantedGlow(
+                mObjectRoot, mResourceSystem, mPtr.getClass().getEnchantmentColor(mPtr));
     }
 
     void ObjectAnimation::harvest(const MWWorld::Ptr& ptr)

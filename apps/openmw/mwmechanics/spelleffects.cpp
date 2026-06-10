@@ -1273,6 +1273,7 @@ namespace MWMechanics
                     if (caster == getPlayer())
                         MWBase::Environment::get().getWindowManager()->messageBox("#{sMagicLockSuccess}");
                     target.getCellRef().lock(magnitude);
+                    MWBase::Environment::get().getWorld()->notifyDoorLockChanged(target);
                 }
             }
             else
@@ -1299,6 +1300,7 @@ namespace MWMechanics
                         if (caster == getPlayer())
                             MWBase::Environment::get().getWindowManager()->messageBox("#{sMagicOpenSuccess}");
                         target.getCellRef().unlock();
+                        MWBase::Environment::get().getWorld()->notifyDoorLockChanged(target);
                     }
                 }
                 else
