@@ -81,7 +81,8 @@ namespace MWRender
         {
             MWWorld::Ptr door;
             osg::ref_ptr<osg::MatrixTransform> quadNode; ///< child of door's base node
-            osg::Vec3f planePoint;   ///< world-space point on the portal plane
+            osg::Vec3f planePoint;   ///< world-space point on the portal plane (at NIF root, used for crossing)
+            osg::Vec3f quadCenter;   ///< world-space center of the visual quad (planePoint + worldOffset)
             osg::Vec3f planeNormal;  ///< world-space normal (faces "outside")
             osg::Quat  invRot;       ///< inverse of door rotation, for local-space projection
             osg::Vec2f halfExtents;  ///< half-width (X) and half-height (Z) of the opening

@@ -1003,6 +1003,7 @@ namespace MWRender
         portal.door        = door;
         portal.quadNode    = quadNode;
         portal.planePoint  = pos;
+        portal.quadCenter  = pos + cellRefRot * localOffset;
         portal.planeNormal = normal;
         portal.invRot      = fullRot.inverse();
         portal.halfExtents = halfExtents;
@@ -1346,7 +1347,7 @@ namespace MWRender
                 bool shouldBeActive = dist2 <= kStreamRange * kStreamRange;
                 if (!shouldBeActive && dist2 <= kStreamRangeFar * kStreamRangeFar)
                 {
-                    const osg::Vec4d clip = osg::Vec4d(portal.planePoint, 1.0) * (viewMatrix * projMatrix);
+                    const osg::Vec4d clip = osg::Vec4d(portal.quadCenter, 1.0) * (viewMatrix * projMatrix);
                     if (clip.w() > 0.0)
                         shouldBeActive = std::abs(clip.x() / clip.w()) <= 1.0
                                       && std::abs(clip.y() / clip.w()) <= 1.0;
@@ -1361,7 +1362,7 @@ namespace MWRender
             // Maps the player's transform relative to the source portal into destination space.
             if (portal.rttNode)
             {
-                const osg::Vec3f diff  = eyePos - portal.planePoint;
+                const osg::Vec3f diff  = eyePos - portal.quadCenter;
                 const osg::Vec3f local = portal.invRot * diff;
                 // Clamp local.y away from zero so the camera never clips through the portal.
                 // For outdoor portal local.y < 0 (player in front); for indoor local.y > 0.
