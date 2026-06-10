@@ -828,7 +828,8 @@ namespace MWRender
             "ex_velothi_loaddoor_01.nif",
             "in_velothismall_ndoor_01.nif",
 			"ex_common_door_01.nif",
-			"ex_common_door_balcony.nif"
+			"ex_common_door_balcony.nif",
+			"in_c_door_wood_square.nif"
         };
         for (const auto& pattern : sPortalModels)
             if (model.find(pattern) != std::string::npos)
@@ -972,21 +973,24 @@ namespace MWRender
 
         osg::Vec2f halfExtents = computeHalfExtents(door);
 
-        // ex_nord_door_01: NIF root sits at the hinge; the actual opening is offset relative
-        // to it. Offset aligns the quad with the ex_nord_doorf_01 frame geometry.
+        // Per-model offset in world space: portal quad center = door world position + worldOffset.
+        // Because the quad is a child of the door's PAT (which applies cellRefRot), we convert
+        // the world-space vector to PAT-local space by multiplying with cellRefRot.inverse().
+        const osg::Quat cellRefRot = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
         osg::Vec3f localOffset;
         {
             std::string model = door.get<ESM::Door>()->mBase->mModel;
             Misc::StringUtils::lowerCaseInPlace(model);
             if (model.find("ex_nord_door_01") != std::string::npos)
-                localOffset = osg::Vec3f(10.f, 13.f, -15.f);
+                localOffset = osg::Vec3f(10.f, 13.f, -15.f);  // door-local space, already tuned
+            else if (model.find("in_c_door_wood_square") != std::string::npos)
+                localOffset = cellRefRot.inverse() * osg::Vec3f(halfExtents.x(), 0.f, halfExtents.y());
         }
         osg::ref_ptr<osg::MatrixTransform> quadNode = buildQuadNode(halfExtents, nifRootQuat, localOffset);
         baseNode->addChild(quadNode);
 
         // World-space portal plane normal = CellRef rotation * NIF root rotation * (-Y).
         // setNodeRotation() will apply CellRef rotation to the PAT after this call returns.
-        const osg::Quat cellRefRot = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
         const osg::Quat fullRot = cellRefRot * nifRootQuat;
         const osg::Vec3f normal = fullRot * osg::Vec3f(0.f, -1.f, 0.f);
         const osg::Vec3f pos = door.getRefData().getPosition().asVec3();
@@ -1040,6 +1044,7 @@ namespace MWRender
                         bestDistSq = distSq;
                         osg::Quat destCellRefRot = Misc::Convert::makeOsgQuat(dPos);
                         osg::Quat destNifRootQuat;
+                        osg::Vec3f destWorldOffset;
                         if (!ref.mBase->mModel.empty())
                         {
                             try
@@ -1049,7 +1054,26 @@ namespace MWRender
                                 osg::ref_ptr<const osg::Node> destNode
                                     = mResourceSystem->getSceneManager()->getTemplate(destModelPath);
                                 if (destNode)
+                                {
                                     destNifRootQuat = getNifRootQuat(destNode.get());
+                                    std::string destModel = ref.mBase->mModel;
+                                    Misc::StringUtils::lowerCaseInPlace(destModel);
+                                    if (destModel.find("in_c_door_wood_square") != std::string::npos)
+                                    {
+                                        osg::ComputeBoundsVisitor cv;
+                                        cv.setTraversalMask(~(Mask_ParticleSystem | Mask_Effect));
+                                        const_cast<osg::Node*>(destNode.get())->accept(cv);
+                                        const osg::BoundingBox& bb = cv.getBoundingBox();
+                                        if (bb.valid())
+                                        {
+                                            const float xSpan = std::abs(bb.xMax() - bb.xMin());
+                                            const float ySpan = std::abs(bb.yMax() - bb.yMin());
+                                            destWorldOffset = osg::Vec3f(
+                                                std::max(xSpan, ySpan) * 0.5f, 0.f,
+                                                std::abs(bb.zMax() - bb.zMin()) * 0.5f);
+                                        }
+                                    }
+                                }
                             }
                             catch (...) {}
                             {
@@ -1059,7 +1083,7 @@ namespace MWRender
                                     destNifRootQuat = destNifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
                             }
                         }
-                        portal.destDoorPos = dPos.asVec3();
+                        portal.destDoorPos = dPos.asVec3() + destWorldOffset;
                         portal.destDoorRot = destCellRefRot * destNifRootQuat;
                     }
                 }
@@ -1315,12 +1339,21 @@ namespace MWRender
         {
             Portal& portal = mPortals[i];
 
-            // Streaming: activate RTT when within kStreamRange, deactivate when beyond.
+            // Streaming: activate within kStreamRange unconditionally,
+            // or within kStreamRangeFar when the portal center is visible in the viewport.
             {
                 const float dist2 = (playerPos - portal.planePoint).length2();
-                if (dist2 <= kStreamRange * kStreamRange && !portal.rttNode)
+                bool shouldBeActive = dist2 <= kStreamRange * kStreamRange;
+                if (!shouldBeActive && dist2 <= kStreamRangeFar * kStreamRangeFar)
+                {
+                    const osg::Vec4d clip = osg::Vec4d(portal.planePoint, 1.0) * (viewMatrix * projMatrix);
+                    if (clip.w() > 0.0)
+                        shouldBeActive = std::abs(clip.x() / clip.w()) <= 1.0
+                                      && std::abs(clip.y() / clip.w()) <= 1.0;
+                }
+                if (shouldBeActive && !portal.rttNode)
                     setupPortalRTT(portal);
-                else if (dist2 > kStreamRange * kStreamRange && portal.rttNode)
+                else if (!shouldBeActive && portal.rttNode)
                     teardownPortalRTT(portal);
             }
 

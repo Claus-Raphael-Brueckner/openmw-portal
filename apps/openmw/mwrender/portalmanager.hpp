@@ -113,7 +113,8 @@ namespace MWRender
         void teardownPortalRTT(Portal& portal);
 
         /// Portals whose RTT is active when the player is closer than this distance.
-        static constexpr float kStreamRange = 1600.f; // ~25 m
+        static constexpr float kStreamRange    = 1600.f; // ~25 m, always active
+        static constexpr float kStreamRangeFar = 3200.f; // ~50 m, active when portal is in viewport
 
         std::vector<Portal> mPortals;
         bool mGhostModeActive = false; ///< true while any portal has approachActive
