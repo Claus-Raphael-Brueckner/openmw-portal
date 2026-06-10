@@ -8,8 +8,6 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
-#include <string_view>
-#include <unordered_map>
 
 #include <components/debug/debuglog.hpp>
 
@@ -84,50 +82,6 @@ namespace MWRender
 {
     namespace
     {
-        // Per-model configuration for portal door types.
-        // Entries here drive isPortalDoor() and replace rotation heuristics.
-        // Add new door types here; no code changes elsewhere are needed.
-        struct DoorSpec
-        {
-            float       halfWidth   = 0.f;   // portal quad half-width  (0 → derive from bounding box)
-            float       halfHeight  = 0.f;   // portal quad half-height (0 → derive from bounding box)
-            float       extraYawDeg = 0.f;   // CCW Z-rotation baked below the NIF root
-            osg::Vec3f  localOffset = {};    // local-space quad offset: X=right, Y=depth(+into door), Z=up
-            std::string frameMesh   = {};    // raw ESM model path of frame mesh to use for bounds, e.g. "n/ex_nord_doorf_01.nif"
-        };
-
-        // Returns the lowercase filename stem of a VFS model path,
-        // e.g. "meshes/i/hlaalu_loaddoor_ 02.nif" → "hlaalu_loaddoor_ 02"
-        std::string modelStem(std::string_view path)
-        {
-            auto slash = path.rfind('/');
-            if (slash == std::string_view::npos) slash = path.rfind('\\');
-            std::string_view file = (slash != std::string_view::npos) ? path.substr(slash + 1) : path;
-            const auto dot = file.rfind('.');
-            std::string s(dot != std::string_view::npos ? file.substr(0, dot) : file);
-            Misc::StringUtils::lowerCaseInPlace(s);
-            return s;
-        }
-
-        const std::unordered_map<std::string, DoorSpec>& portalDoorSpecs()
-        {
-            // clang-format off
-            static const std::unordered_map<std::string, DoorSpec> s = {
-                //  filename stem                    halfW   halfH  yawDeg  localOffset (X=right, Y=depth, Z=up)
-                { "ex_cave_door_01",          {  0.f,  0.f,    0.f } },
-                { "in_cave_door_01",          {  0.f,  0.f,    0.f } },
-                { "ex_nord_door_01",          {  0.f,  0.f,    0.f, osg::Vec3f(10.f, 13.0f, -15.0f) } },
-                { "hlaalu_loaddoor_ 02",      {  0.f,  0.f,    0.f } },
-                { "in_hlaalu_loaddoor_01",    {  0.f,  0.f,  -90.f } },  // -90° baked below NIF root
-                { "in_hlaalu_door",           {  0.f,  0.f,    0.f } },
-                { "ex_velothi_loaddoor_01",   {  0.f,  0.f,    0.f } },
-                { "in_velothismall_ndoor_01", {  0.f,  0.f,    0.f } },
-                { "ex_common_door_balcony",   {  0.f,  0.f,    0.f } },
-            };
-            // clang-format on
-            return s;
-        }
-
         // 1×1 RGBA8 texture filled with a constant color.
         osg::ref_ptr<osg::Texture2D> makeSolidTexture(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
         {
@@ -860,21 +814,38 @@ namespace MWRender
         if (!door.getCellRef().getTeleport())
             return false;
         const auto* base = door.get<ESM::Door>()->mBase;
-        if (!base || base->mModel.empty())
+        if (!base)
             return false;
-        return portalDoorSpecs().count(modelStem(base->mModel)) > 0;
+        std::string model = base->mModel;
+        Misc::StringUtils::lowerCaseInPlace(model);
+        static const std::string_view sPortalModels[] = {
+            "ex_cave_door_01.nif",
+            "in_cave_door_01.nif",
+            "ex_nord_door_01.nif",
+            "hlaalu_loaddoor_ 02.nif",
+            "in_hlaalu_door.nif",
+            "ex_velothi_loaddoor_01.nif",
+            "in_velothismall_ndoor_01.nif",
+			"ex_common_door_01.nif",
+			"ex_common_door_balcony.nif"
+        };
+        for (const auto& pattern : sPortalModels)
+            if (model.find(pattern) != std::string::npos)
+                return true;
+        return false;
     }
 
-    osg::Vec2f PortalManager::computeHalfExtents(const VFS::Path::Normalized& meshPath) const
+    osg::Vec2f PortalManager::computeHalfExtents(const MWWorld::Ptr& door) const
     {
         const osg::Vec2f fallback(96.f, 128.f);
 
-        if (meshPath.empty())
+        VFS::Path::Normalized modelPath(door.getClass().getCorrectedModel(door));
+        if (modelPath.empty())
             return fallback;
 
         try
         {
-            osg::ref_ptr<const osg::Node> node = mResourceSystem->getSceneManager()->getTemplate(meshPath);
+            osg::ref_ptr<const osg::Node> node = mResourceSystem->getSceneManager()->getTemplate(modelPath);
             if (!node)
                 return fallback;
 
@@ -885,9 +856,7 @@ namespace MWRender
             if (!bb.valid())
                 return fallback;
 
-            const float xSpan = std::abs(bb.xMax() - bb.xMin());
-            const float ySpan = std::abs(bb.yMax() - bb.yMin());
-            return osg::Vec2f(std::max(xSpan, ySpan) * 0.5f,
+            return osg::Vec2f(std::abs(bb.xMax() - bb.xMin()) * 0.5f,
                 std::abs(bb.zMax() - bb.zMin()) * 0.5f);
         }
         catch (...)
@@ -942,8 +911,6 @@ namespace MWRender
         osg::ref_ptr<osg::Geode> geode = new osg::Geode;
         geode->addDrawable(geom);
 
-        // Rotation (nifRootQuat + any extraYaw from the spec) and optional local offset.
-        // The PAT parent adds the CellRef rotation on top.
         osg::ref_ptr<osg::MatrixTransform> mt = new osg::MatrixTransform;
         mt->setMatrix(osg::Matrix::rotate(nifRootQuat) * osg::Matrix::translate(localOffset));
         mt->addChild(geode);
@@ -992,23 +959,17 @@ namespace MWRender
             catch (...) {}
         }
 
-        // Apply per-model rotation and size corrections from the spec table.
-        // extraYawDeg handles rotations baked below the NIF root that getNifRootQuat() misses.
-        // Explicit halfWidth/halfHeight override the bounding-box measurement when non-zero.
-        const auto& specs = portalDoorSpecs();
-        const auto specIt = specs.find(modelStem(door.get<ESM::Door>()->mBase->mModel));
-        if (specIt != specs.end() && specIt->second.extraYawDeg != 0.f)
-            nifRootQuat = nifRootQuat * osg::Quat(
-                osg::DegreesToRadians(specIt->second.extraYawDeg), osg::Vec3f(0.f, 0.f, 1.f));
+        osg::Vec2f halfExtents = computeHalfExtents(door);
 
-        VFS::Path::Normalized boundsPath = modelPath;
-        if (specIt != specs.end() && !specIt->second.frameMesh.empty())
-            boundsPath = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(specIt->second.frameMesh));
-
-        const osg::Vec2f halfExtents = (specIt != specs.end() && specIt->second.halfWidth > 0.f)
-            ? osg::Vec2f(specIt->second.halfWidth, specIt->second.halfHeight)
-            : computeHalfExtents(boundsPath);
-        const osg::Vec3f localOffset = (specIt != specs.end()) ? specIt->second.localOffset : osg::Vec3f();
+        // ex_nord_door_01: NIF root sits at the hinge; the actual opening is offset relative
+        // to it. Offset aligns the quad with the ex_nord_doorf_01 frame geometry.
+        osg::Vec3f localOffset;
+        {
+            std::string model = door.get<ESM::Door>()->mBase->mModel;
+            Misc::StringUtils::lowerCaseInPlace(model);
+            if (model.find("ex_nord_door_01") != std::string::npos)
+                localOffset = osg::Vec3f(10.f, 13.f, -15.f);
+        }
         osg::ref_ptr<osg::MatrixTransform> quadNode = buildQuadNode(halfExtents, nifRootQuat, localOffset);
         baseNode->addChild(quadNode);
 
@@ -1016,15 +977,7 @@ namespace MWRender
         // setNodeRotation() will apply CellRef rotation to the PAT after this call returns.
         const osg::Quat cellRefRot = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
         const osg::Quat fullRot = cellRefRot * nifRootQuat;
-        osg::Vec3f normal = fullRot * osg::Vec3f(0.f, -1.f, 0.f);
-        // Force the trigger plane to be vertical: strip any Z component that a non-standard
-        // NIF root rotation might introduce (e.g. ex_common_door_balcony.nif). Without this,
-        // the crossing check fires on height rather than horizontal position.
-        normal.z() = 0.f;
-        if (normal.length2() > 1e-6f)
-            normal.normalize();
-        else
-            normal = osg::Vec3f(0.f, 1.f, 0.f);
+        const osg::Vec3f normal = fullRot * osg::Vec3f(0.f, -1.f, 0.f);
         const osg::Vec3f pos = door.getRefData().getPosition().asVec3();
 
         const osg::Vec3f playerPos
@@ -1097,44 +1050,9 @@ namespace MWRender
                                 destNifRootQuat = getNifRootQuat(destNode.get());
                         }
                         catch (...) {}
-                        // Apply the same per-model yaw correction to the destination NIF root.
-                        const auto destSpecIt = specs.find(modelStem(ref.mBase->mModel));
-                        if (destSpecIt != specs.end() && destSpecIt->second.extraYawDeg != 0.f)
-                            destNifRootQuat = destNifRootQuat * osg::Quat(
-                                osg::DegreesToRadians(destSpecIt->second.extraYawDeg), osg::Vec3f(0.f, 0.f, 1.f));
                     }
                     portal.destDoorPos = dPos.asVec3();
                     portal.destDoorRot = destCellRefRot * destNifRootQuat;
-                }
-
-                // Compute the canonical destination forward direction from the spawn position.
-                // Morrowind always places the spawn point directly in front of the destination
-                // door, so the door→spawn vector is always the correct "into the destination
-                // scene" direction — regardless of NIF root rotation differences between models.
-                // Snapping to the nearest cardinal axis avoids noise from small diagonal offsets.
-                // This approach handles mixed-model door pairs (e.g. in_hlaalu_loaddoor_01 +
-                // hlaalu_loaddoor_ 02) where the NIF rotations differ and dot-product flip
-                // detection can silently fail when the two forward axes are perpendicular.
-                {
-                    const osg::Vec3f spawnOffset = portal.destPoint - portal.destDoorPos;
-                    const float spawnDistXY2 = spawnOffset.x() * spawnOffset.x()
-                                             + spawnOffset.y() * spawnOffset.y();
-                    if (spawnDistXY2 > 25.f)
-                    {
-                        portal.destFwdCanonical =
-                            (std::abs(spawnOffset.x()) >= std::abs(spawnOffset.y()))
-                            ? osg::Vec3f(spawnOffset.x() > 0.f ? 1.f : -1.f, 0.f, 0.f)
-                            : osg::Vec3f(0.f, spawnOffset.y() > 0.f ? 1.f : -1.f, 0.f);
-                    }
-                    else
-                    {
-                        // Fallback when no back-door found or spawn is at door center.
-                        osg::Vec3f d = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-                        d.z() = 0.f;
-                        if (d.length2() > 1e-6f) d.normalize();
-                        else d = portal.planeNormal;
-                        portal.destFwdCanonical = d;
-                    }
                 }
             }
 
@@ -1197,7 +1115,10 @@ namespace MWRender
             portal.destIsExterior = destIsExterior;
             if (destIsExterior)
                 portal.rttNode->setClearColor(mExteriorSkyColor);
-            portal.rttNode->setClipPlaneBoundary(portal.destFwdCanonical, portal.destDoorPos);
+            {
+                const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
+                portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos);
+            }
             portal.rttNode->setClipEnabled(true);
             portal.rttNode->setNodeMask(Mask_RenderToTexture);
             if (mRttParent)
@@ -1354,36 +1275,35 @@ namespace MWRender
             // Maps the player's transform relative to the source portal into destination space.
             if (portal.rttNode)
             {
-                const osg::Vec3f diff = eyePos - portal.planePoint;
-
-                // Decompose player offset into the source door's local frame.
-                // invRot is the inverse of (cellRefRot * corrected_nifRootQuat), so it maps
-                // world-space diff into the source door's NIF-local coordinate system.
+                const osg::Vec3f diff  = eyePos - portal.planePoint;
                 const osg::Vec3f local = portal.invRot * diff;
-                // Clamp away from zero so the RTT camera never clips through the portal plane.
-                // local.y < 0: player on outward side (exterior portal).
-                // local.y > 0: player on inward side (interior portal).
+                // Clamp local.y away from zero so the camera never clips through the portal.
+                // For outdoor portal local.y < 0 (player in front); for indoor local.y > 0.
                 const float ly = (local.y() < 0.f)
                     ? std::min(local.y(), -10.f)
                     : std::max(local.y(),  10.f);
 
-                // Destination frame — destDoorRot includes the same extraYawDeg correction
-                // applied to the destination NIF root, so the local-frame mapping is consistent.
                 const osg::Vec3f forward = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
                 const osg::Vec3f right   = portal.destDoorRot * osg::Vec3f(1.f,  0.f, 0.f);
                 const osg::Vec3f upVec   = portal.destDoorRot * osg::Vec3f(0.f,  0.f, 1.f);
 
                 const float lyAbs = std::abs(ly);
+
                 const osg::Vec3f camPos = portal.destDoorPos
                     - forward * lyAbs
                     - right   * local.x()
                     + upVec   * local.z();
 
-                // Mirror the player's look direction through the portal:
-                // negate X (lateral mirror) and Y (opposite facing), keep Z (up).
+                // RTT camera mirrors the player's lateral look angle through the portal.
+                // Source and destination doors may have opposite local-y conventions, so we
+                // take x/z (lateral) from the transformed player look but force y = -1
+                // (destination convention: local -y = into cave), mirroring how the position
+                // formula uses lyAbs to always displace the camera in the forward direction.
+                // Both doors use local -y = forward but face opposite world directions.
+                // Flip x (mirror) and y (opposite facing), keep z: 180-deg rotation around portal Z.
                 const osg::Vec3f srcLocal = portal.invRot * playerLook;
-                const osg::Vec3f rttLook
-                    = portal.destDoorRot * osg::Vec3f(-srcLocal.x(), -srcLocal.y(), srcLocal.z());
+                const osg::Vec3f rttLook = portal.destDoorRot * osg::Vec3f(-srcLocal.x(), -srcLocal.y(), srcLocal.z());
+                // Fixed portal up avoids gimbal lock when rttLook approaches world-up.
                 const osg::Vec3f rttUp = upVec;
                 const osg::Matrixd portalView = osg::Matrix::lookAt(
                     osg::Vec3d(camPos),
