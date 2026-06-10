@@ -823,6 +823,7 @@ namespace MWRender
             "in_cave_door_01.nif",
             "ex_nord_door_01.nif",
             "hlaalu_loaddoor_ 02.nif",
+            "in_hlaalu_loaddoor_01.nif",
             "in_hlaalu_door.nif",
             "ex_velothi_loaddoor_01.nif",
             "in_velothismall_ndoor_01.nif",
@@ -856,7 +857,9 @@ namespace MWRender
             if (!bb.valid())
                 return fallback;
 
-            return osg::Vec2f(std::abs(bb.xMax() - bb.xMin()) * 0.5f,
+            const float xSpan = std::abs(bb.xMax() - bb.xMin());
+            const float ySpan = std::abs(bb.yMax() - bb.yMin());
+            return osg::Vec2f(std::max(xSpan, ySpan) * 0.5f,
                 std::abs(bb.zMax() - bb.zMin()) * 0.5f);
         }
         catch (...)
@@ -959,6 +962,14 @@ namespace MWRender
             catch (...) {}
         }
 
+        // in_hlaalu_loaddoor_01 bakes a -90° Z rotation below the NIF root node.
+        {
+            std::string model = door.get<ESM::Door>()->mBase->mModel;
+            Misc::StringUtils::lowerCaseInPlace(model);
+            if (model.find("in_hlaalu_loaddoor_01") != std::string::npos)
+                nifRootQuat = nifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
+        }
+
         osg::Vec2f halfExtents = computeHalfExtents(door);
 
         // ex_nord_door_01: NIF root sits at the hinge; the actual opening is offset relative
@@ -1050,6 +1061,13 @@ namespace MWRender
                                 destNifRootQuat = getNifRootQuat(destNode.get());
                         }
                         catch (...) {}
+                        // Apply same -90° correction for in_hlaalu_loaddoor_01 destination door.
+                        {
+                            std::string destModel = ref.mBase->mModel;
+                            Misc::StringUtils::lowerCaseInPlace(destModel);
+                            if (destModel.find("in_hlaalu_loaddoor_01") != std::string::npos)
+                                destNifRootQuat = destNifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
+                        }
                     }
                     portal.destDoorPos = dPos.asVec3();
                     portal.destDoorRot = destCellRefRot * destNifRootQuat;
