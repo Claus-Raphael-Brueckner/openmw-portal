@@ -9,6 +9,8 @@
 #include <osg/Vec4f>
 #include <osg/ref_ptr>
 
+#include <components/vfs/pathutil.hpp>
+
 #include "../mwworld/ptr.hpp"
 
 namespace osg
@@ -104,8 +106,8 @@ namespace MWRender
             bool approachActive = false; ///< ghost mode currently active for this portal
         };
 
-        osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Quat& nifRootQuat) const;
-        osg::ref_ptr<osg::MatrixTransform> buildQuadNode(const osg::Vec2f& halfExtents, const osg::Quat& nifRootQuat) const;
+        osg::Vec2f computeHalfExtents(const VFS::Path::Normalized& meshPath) const;
+        osg::ref_ptr<osg::MatrixTransform> buildQuadNode(const osg::Vec2f& halfExtents, const osg::Quat& nifRootQuat, const osg::Vec3f& localOffset = {}) const;
         bool isWithinBounds(const osg::Vec3f& playerPos, const Portal& portal) const;
 
         std::vector<Portal> mPortals;
