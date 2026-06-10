@@ -10,6 +10,7 @@
 #include <osg/ref_ptr>
 
 #include "../mwworld/ptr.hpp"
+#include <components/esm/refid.hpp>
 
 namespace osg
 {
@@ -88,6 +89,7 @@ namespace MWRender
             osg::Vec2f halfExtents;  ///< half-width (X) and half-height (Z) of the opening
             bool lastSide = true;    ///< which side of the plane the player was on last frame
             int cooldown = 0;        ///< frames to wait; prevents immediate re-trigger
+            ESM::RefId destCellId;   ///< cached dest cell id (avoid re-dereferencing door Ptr later)
             osg::Vec3f destPoint;    ///< world-space arrival position in the destination cell
             osg::Quat  destRot;      ///< orientation of the arrival point (forward = into dest)
             osg::Vec3f destDoorPos;  ///< world-space center of the actual destination door

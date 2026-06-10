@@ -44,6 +44,7 @@
 #include <components/misc/strings/algorithm.hpp>
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
+#include <components/vfs/manager.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/lightcommon.hpp>
 #include <components/sceneutil/lightmanager.hpp>
@@ -82,6 +83,19 @@ namespace MWRender
 {
     namespace
     {
+        static constexpr std::string_view sPortalModels[] = {
+            "ex_cave_door_01.nif",
+            "in_cave_door_01.nif",
+            "ex_nord_door_01.nif",
+            "hlaalu_loaddoor_ 02.nif",
+            "in_hlaalu_loaddoor_01.nif",
+            "in_hlaalu_door.nif",
+            "ex_velothi_loaddoor_01.nif",
+            "in_velothismall_ndoor_01.nif",
+            "ex_common_door_01.nif",
+            "ex_common_door_balcony.nif",
+            "in_c_door_wood_square.nif"
+        };
         // 1×1 RGBA8 texture filled with a constant color.
         osg::ref_ptr<osg::Texture2D> makeSolidTexture(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
         {
@@ -591,22 +605,34 @@ namespace MWRender
             };
 
             addRefs(cellStore->getReadOnlyStatics().mList);
-            // Skip teleport doors: they are replaced by portal quads in the live scene and
-            // would otherwise appear as physical door meshes blocking the RTT view.
             for (const auto& ref : cellStore->getReadOnlyDoors().mList)
             {
                 if (!ref.mBase || ref.mBase->mModel.empty()) continue;
                 if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef)) continue;
                 if (!ref.mData.isEnabled()) continue;
-                if (ref.mRef.getTeleport()) continue;  // portal doors: skip
+                if (ref.mRef.getTeleport())
+                {
+                    // Interior destination: skip portal doors (portal quads handle those).
+                    // Exterior destination: show the original mesh so the door frame is visible.
+                    if (!cellStore->getCell()->isExterior()) continue;
+                    std::string m = ref.mBase->mModel;
+                    Misc::StringUtils::lowerCaseInPlace(m);
+                    bool known = false;
+                    for (const auto& p : sPortalModels)
+                        if (m.find(p) != std::string::npos) { known = true; break; }
+                    if (!known) continue;
+                }
                 const ESM::Position& pos = ref.mRef.getPosition();
                 const float dx = pos.pos[0] - destCenter.x();
                 const float dy = pos.pos[1] - destCenter.y();
                 if (dx * dx + dy * dy > maxDistSq) continue;
+                // Skip the destination door itself — it sits right at the camera and would block the view.
+                if (ref.mRef.getTeleport() && dx * dx + dy * dy < 150.f * 150.f) continue;
                 try
                 {
                     VFS::Path::Normalized modelPath = Misc::ResourceHelpers::correctMeshPath(
                         VFS::Path::Normalized(ref.mBase->mModel));
+                    if (!resourceSystem->getVFS()->exists(modelPath)) continue;
                     osg::ref_ptr<osg::Node> node = resourceSystem->getSceneManager()->getInstance(modelPath);
                     const float scale = ref.mRef.getScale();
                     osg::ref_ptr<osg::PositionAttitudeTransform> pat = new osg::PositionAttitudeTransform;
@@ -818,19 +844,6 @@ namespace MWRender
             return false;
         std::string model = base->mModel;
         Misc::StringUtils::lowerCaseInPlace(model);
-        static const std::string_view sPortalModels[] = {
-            "ex_cave_door_01.nif",
-            "in_cave_door_01.nif",
-            "ex_nord_door_01.nif",
-            "hlaalu_loaddoor_ 02.nif",
-            "in_hlaalu_loaddoor_01.nif",
-            "in_hlaalu_door.nif",
-            "ex_velothi_loaddoor_01.nif",
-            "in_velothismall_ndoor_01.nif",
-			"ex_common_door_01.nif",
-			"ex_common_door_balcony.nif",
-			"in_c_door_wood_square.nif"
-        };
         for (const auto& pattern : sPortalModels)
             if (model.find(pattern) != std::string::npos)
                 return true;
@@ -1018,6 +1031,7 @@ namespace MWRender
         // destIsExterior and destDoorPos/Rot are needed by the streaming system and update().
         {
             const ESM::RefId destCellId = door.getCellRef().getDestCell();
+            portal.destCellId = destCellId;
             const ESM::Position destPos = door.getCellRef().getDoorDest();
             portal.destPoint = destPos.asVec3();
             portal.destRot   = Misc::Convert::makeOsgQuat(destPos);
@@ -1129,9 +1143,8 @@ namespace MWRender
     {
         try
         {
-            const ESM::RefId destCellId = portal.door.getCellRef().getDestCell();
             MWWorld::CellStore* destCellStore
-                = MWBase::Environment::get().getWorld()->findCellStore(destCellId);
+                = MWBase::Environment::get().getWorld()->findCellStore(portal.destCellId);
 
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
