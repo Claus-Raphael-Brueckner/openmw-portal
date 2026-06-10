@@ -107,6 +107,14 @@ namespace MWRender
         osg::ref_ptr<osg::MatrixTransform> buildQuadNode(const osg::Vec2f& halfExtents, const osg::Quat& nifRootQuat, const osg::Vec3f& localOffset = {}) const;
         bool isWithinBounds(const osg::Vec3f& playerPos, const Portal& portal) const;
 
+        /// Build and attach the RTT scene for a portal that is now within streaming range.
+        void setupPortalRTT(Portal& portal);
+        /// Tear down the RTT scene for a portal that has left streaming range.
+        void teardownPortalRTT(Portal& portal);
+
+        /// Portals whose RTT is active when the player is closer than this distance.
+        static constexpr float kStreamRange = 1600.f; // ~25 m
+
         std::vector<Portal> mPortals;
         bool mGhostModeActive = false; ///< true while any portal has approachActive
         Resource::ResourceSystem* mResourceSystem;

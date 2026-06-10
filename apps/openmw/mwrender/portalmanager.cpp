@@ -1009,84 +1009,115 @@ namespace MWRender
         // trigger is armed. 30 frames ≈ 0.5 s at 60 fps is enough for the cell transition to settle.
         portal.cooldown    = 30;
 
-        // --- Stage 2: build RTT portal scene ---
-        // Wrapped in try-catch: if shader loading or cell loading fails, the portal still works
-        // (walk-through teleport is active) but renders as a white quad.
-        try
+        // Destination door lookup (cheap: in-memory iteration, no RTT construction).
+        // destIsExterior and destDoorPos/Rot are needed by the streaming system and update().
         {
             const ESM::RefId destCellId = door.getCellRef().getDestCell();
-
-            // Destination info — spawn point from CellRef (may differ from actual door center).
             const ESM::Position destPos = door.getCellRef().getDoorDest();
             portal.destPoint = destPos.asVec3();
             portal.destRot   = Misc::Convert::makeOsgQuat(destPos);
-
-            // Find the actual destination door that leads back to our source cell.
-            // The spawn point (destPoint) is the player arrival position, not the door center.
             portal.destDoorPos = portal.destPoint;
             portal.destDoorRot = portal.destRot;
-
-            MWWorld::CellStore* destCellStore
-                = MWBase::Environment::get().getWorld()->findCellStore(destCellId);
-            if (destCellStore)
+            try
             {
-                const ESM::RefId sourceCellId = door.getCell()->getCell()->getId();
-                // Pick the door closest to destPoint when multiple doors lead back to the same
-                // source cell (e.g. several Hlaalu buildings sharing an exterior cell).
-                float bestDistSq = std::numeric_limits<float>::max();
-                for (const auto& ref : destCellStore->getReadOnlyDoors().mList)
+                MWWorld::CellStore* destCellStore
+                    = MWBase::Environment::get().getWorld()->findCellStore(destCellId);
+                portal.destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
+                if (destCellStore)
                 {
-                    if (!ref.mBase || !ref.mRef.getTeleport())
-                        continue;
-                    if (ref.mRef.getDestCell() != sourceCellId)
-                        continue;
-
-                    const ESM::Position& dPos = ref.mRef.getPosition();
-                    const float distSq = (dPos.asVec3() - portal.destPoint).length2();
-                    if (distSq >= bestDistSq)
-                        continue;
-                    bestDistSq = distSq;
-
-                    osg::Quat destCellRefRot = Misc::Convert::makeOsgQuat(dPos);
-                    osg::Quat destNifRootQuat;
-                    if (!ref.mBase->mModel.empty())
+                    const ESM::RefId sourceCellId = door.getCell()->getCell()->getId();
+                    float bestDistSq = std::numeric_limits<float>::max();
+                    for (const auto& ref : destCellStore->getReadOnlyDoors().mList)
                     {
-                        try
+                        if (!ref.mBase || !ref.mRef.getTeleport())
+                            continue;
+                        if (ref.mRef.getDestCell() != sourceCellId)
+                            continue;
+                        const ESM::Position& dPos = ref.mRef.getPosition();
+                        const float distSq = (dPos.asVec3() - portal.destPoint).length2();
+                        if (distSq >= bestDistSq)
+                            continue;
+                        bestDistSq = distSq;
+                        osg::Quat destCellRefRot = Misc::Convert::makeOsgQuat(dPos);
+                        osg::Quat destNifRootQuat;
+                        if (!ref.mBase->mModel.empty())
                         {
-                            VFS::Path::Normalized destModelPath = Misc::ResourceHelpers::correctMeshPath(
-                                VFS::Path::Normalized(ref.mBase->mModel));
-                            osg::ref_ptr<const osg::Node> destNode
-                                = mResourceSystem->getSceneManager()->getTemplate(destModelPath);
-                            if (destNode)
-                                destNifRootQuat = getNifRootQuat(destNode.get());
+                            try
+                            {
+                                VFS::Path::Normalized destModelPath = Misc::ResourceHelpers::correctMeshPath(
+                                    VFS::Path::Normalized(ref.mBase->mModel));
+                                osg::ref_ptr<const osg::Node> destNode
+                                    = mResourceSystem->getSceneManager()->getTemplate(destModelPath);
+                                if (destNode)
+                                    destNifRootQuat = getNifRootQuat(destNode.get());
+                            }
+                            catch (...) {}
+                            {
+                                std::string destModel = ref.mBase->mModel;
+                                Misc::StringUtils::lowerCaseInPlace(destModel);
+                                if (destModel.find("in_hlaalu_loaddoor_01") != std::string::npos)
+                                    destNifRootQuat = destNifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
+                            }
                         }
-                        catch (...) {}
-                        // Apply same -90° correction for in_hlaalu_loaddoor_01 destination door.
-                        {
-                            std::string destModel = ref.mBase->mModel;
-                            Misc::StringUtils::lowerCaseInPlace(destModel);
-                            if (destModel.find("in_hlaalu_loaddoor_01") != std::string::npos)
-                                destNifRootQuat = destNifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
-                        }
+                        portal.destDoorPos = dPos.asVec3();
+                        portal.destDoorRot = destCellRefRot * destNifRootQuat;
                     }
-                    portal.destDoorPos = dPos.asVec3();
-                    portal.destDoorRot = destCellRefRot * destNifRootQuat;
                 }
             }
+            catch (...) {}
+        }
+
+        // screenRes is always needed (portal shader reads it even before RTT is active).
+        {
+            const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
+            const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
+            quadNode->getOrCreateStateSet()->addUniform(
+                new osg::Uniform("screenRes", osg::Vec2f(float(screenW), float(screenH))));
+        }
+        // Quad is invisible until the streaming system activates the RTT (setupPortalRTT restores the mask).
+        quadNode->setNodeMask(0);
+
+        mPortals.push_back(std::move(portal));
+
+        // Activate RTT immediately if the player is already within streaming range.
+        if ((playerPos - mPortals.back().planePoint).length2() <= kStreamRange * kStreamRange)
+            setupPortalRTT(mPortals.back());
+
+        return true;
+    }
+
+    void PortalManager::destroyPortal(const MWWorld::Ptr& door)
+    {
+        auto it = std::find_if(mPortals.begin(), mPortals.end(),
+            [&door](const Portal& p) { return p.door.mRef == door.mRef; });
+        if (it != mPortals.end())
+        {
+            // Do NOT call physics cleanup here — destroyPortal runs during cell unloading
+            // while physics state is in flux; calling setCollisionFilterMask then crashes.
+            // mGhostModeActive stays true so update() cleans up on the next stable frame.
+            teardownPortalRTT(*it);
+            mPortals.erase(it);
+        }
+    }
+
+    void PortalManager::setupPortalRTT(Portal& portal)
+    {
+        try
+        {
+            const ESM::RefId destCellId = portal.door.getCellRef().getDestCell();
+            MWWorld::CellStore* destCellStore
+                = MWBase::Environment::get().getWorld()->findCellStore(destCellId);
 
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
 
-            // Build scene (statics + terrain, no water yet).
             PortalSceneResult sceneResult = buildPortalScene(
                 destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode,
                 mSkyManager, osg::Vec2f(float(screenW), float(screenH)),
                 mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, mExteriorSkyColor);
 
-            const bool destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
-            const bool hasWater = destIsExterior && destCellStore->getCell()->hasWater();
+            const bool hasWater = portal.destIsExterior && destCellStore && destCellStore->getCell()->hasWater();
 
-            // Create reflection and refraction RTTs before adding water (water needs refs to them).
             if (hasWater && mRttParent)
             {
                 auto* scene = sceneResult.scene.get();
@@ -1101,7 +1132,6 @@ namespace MWRender
                 mRttParent->addChild(portal.refractionRTTNode);
             }
 
-            // Now add water with proper reflection/refraction RTTs.
             if (hasWater)
             {
                 osg::ref_ptr<osg::Texture2D> waterSkyTex;
@@ -1115,12 +1145,11 @@ namespace MWRender
                 sceneResult.scene->addChild(wn);
             }
 
-            portal.sunLight     = sceneResult.sunLight;
+            portal.sunLight       = sceneResult.sunLight;
             portal.lightModelAttr = sceneResult.lightModelAttr;
 
-            // Build sky scene for exterior destination portals.
             osg::ref_ptr<osg::Group> skyScene;
-            if (destIsExterior && mSkyManager)
+            if (portal.destIsExterior && mSkyManager)
             {
                 osg::ref_ptr<CameraRelativeTransform> skyWrapper = new CameraRelativeTransform;
                 skyWrapper->setNodeMask(Mask_Sky);
@@ -1130,8 +1159,7 @@ namespace MWRender
             }
 
             portal.rttNode = new PortalRTTNode(sceneResult.scene.get(), skyScene.get(), screenW, screenH, shouldAddMSAAIntermediateTarget());
-            portal.destIsExterior = destIsExterior;
-            if (destIsExterior)
+            if (portal.destIsExterior)
                 portal.rttNode->setClearColor(mExteriorSkyColor);
             {
                 const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
@@ -1144,18 +1172,16 @@ namespace MWRender
 
             Shader::ShaderManager& shaderMgr = mResourceSystem->getSceneManager()->getShaderManager();
             osg::ref_ptr<osg::Program> portalProgram = shaderMgr.getProgram("portal");
-
             osg::ref_ptr<PortalStateSetUpdater> ssUpdater
                 = new PortalStateSetUpdater(portal.rttNode.get(), portalProgram.get());
-            quadNode->addCullCallback(ssUpdater);
-            quadNode->getOrCreateStateSet()->addUniform(
-                new osg::Uniform("screenRes", osg::Vec2f(float(screenW), float(screenH))));
+            portal.quadNode->setCullCallback(ssUpdater);
+            portal.quadNode->setNodeMask(Mask_PortalQuad);
 
             portal.portalScene = sceneResult.scene;
         }
         catch (const std::exception& e)
         {
-            Log(Debug::Warning) << "PortalManager: RTT setup failed (" << e.what() << "); portal will be white";
+            Log(Debug::Warning) << "PortalManager: RTT setup failed (" << e.what() << "); portal inactive";
             if (portal.rttNode && mRttParent)
                 mRttParent->removeChild(portal.rttNode);
             if (portal.reflectionRTTNode && mRttParent)
@@ -1167,40 +1193,40 @@ namespace MWRender
             portal.refractionRTTNode = nullptr;
             portal.portalScene       = nullptr;
         }
-
-        mPortals.push_back(std::move(portal));
-        return true;
     }
 
-    void PortalManager::destroyPortal(const MWWorld::Ptr& door)
+    void PortalManager::teardownPortalRTT(Portal& portal)
     {
-        auto it = std::find_if(mPortals.begin(), mPortals.end(),
-            [&door](const Portal& p) { return p.door.mRef == door.mRef; });
-        if (it != mPortals.end())
+        if (portal.rttNode && mRttParent)
+            mRttParent->removeChild(portal.rttNode);
+        if (portal.reflectionRTTNode && mRttParent)
+            mRttParent->removeChild(portal.reflectionRTTNode);
+        if (portal.refractionRTTNode && mRttParent)
+            mRttParent->removeChild(portal.refractionRTTNode);
+
+        // Detach the shared terrain node so the portal's LightManager releases it.
+        if (portal.destIsExterior && mExteriorTerrainNode && portal.portalScene)
         {
-            // Do NOT call physics cleanup here — destroyPortal runs during cell unloading
-            // while physics state is in flux; calling setCollisionFilterMask then crashes.
-            // mGhostModeActive stays true so update() cleans up on the next stable frame.
-
-            if (it->rttNode && mRttParent)
-                mRttParent->removeChild(it->rttNode);
-            if (it->reflectionRTTNode && mRttParent)
-                mRttParent->removeChild(it->reflectionRTTNode);
-            if (it->refractionRTTNode && mRttParent)
-                mRttParent->removeChild(it->refractionRTTNode);
-
-            // Detach the shared mExteriorTerrainNode from the portal scene so the portal's
-            // LightManager no longer owns a reference to it. In the no-sky case portalScene IS
-            // the LightManager; in the sky case the LightManager is the first child of the root.
-            if (it->destIsExterior && mExteriorTerrainNode && it->portalScene)
-            {
-                it->portalScene->removeChild(mExteriorTerrainNode);
-                for (unsigned int c = 0; c < it->portalScene->getNumChildren(); ++c)
-                    if (auto* g = dynamic_cast<osg::Group*>(it->portalScene->getChild(c)))
-                        g->removeChild(mExteriorTerrainNode);
-            }
-            mPortals.erase(it);
+            portal.portalScene->removeChild(mExteriorTerrainNode);
+            for (unsigned int c = 0; c < portal.portalScene->getNumChildren(); ++c)
+                if (auto* g = dynamic_cast<osg::Group*>(portal.portalScene->getChild(c)))
+                    g->removeChild(mExteriorTerrainNode);
         }
+
+        portal.quadNode->setCullCallback(nullptr);
+        portal.quadNode->setNodeMask(0);
+
+        portal.rttNode           = nullptr;
+        portal.reflectionRTTNode = nullptr;
+        portal.refractionRTTNode = nullptr;
+        portal.portalScene       = nullptr;
+        portal.sunLight          = nullptr;
+        portal.lightModelAttr    = nullptr;
+        portal.waterSkyTex       = nullptr;
+
+        // If ghost mode was active for this portal, clear the flag so the watchdog
+        // in update() sees no active portal and disables ghost mode + removes physics objects.
+        portal.approachActive = false;
     }
 
     // --------------------------------------------------------------------------
@@ -1289,6 +1315,15 @@ namespace MWRender
         {
             Portal& portal = mPortals[i];
 
+            // Streaming: activate RTT when within kStreamRange, deactivate when beyond.
+            {
+                const float dist2 = (playerPos - portal.planePoint).length2();
+                if (dist2 <= kStreamRange * kStreamRange && !portal.rttNode)
+                    setupPortalRTT(portal);
+                else if (dist2 > kStreamRange * kStreamRange && portal.rttNode)
+                    teardownPortalRTT(portal);
+            }
+
             // Stage 3: update RTT camera to track the player's position and look direction.
             // Maps the player's transform relative to the source portal into destination space.
             if (portal.rttNode)
@@ -1353,6 +1388,15 @@ namespace MWRender
             if (portal.cooldown > 0)
             {
                 --portal.cooldown;
+                const float d = (eyePos - portal.planePoint) * portal.planeNormal;
+                portal.lastSide = (d >= 0.f);
+                continue;
+            }
+
+            // Only trigger crossing while the portal is visually active (RTT running).
+            // An inactive portal (NodeMask = 0, no RTT) must not teleport the player silently.
+            if (!portal.rttNode)
+            {
                 const float d = (eyePos - portal.planePoint) * portal.planeNormal;
                 portal.lastSide = (d >= 0.f);
                 continue;
