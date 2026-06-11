@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -E \"\\\\.\\(hpp|h|cpp\\)$\")"
+      "Bash(grep -E \"\\\\.\\(hpp|h|cpp\\)$\")",
+      "Bash(git -C /home/claus/projects/openmw-master show 439661a -- apps/openmw/mwrender/portalmanager.cpp)"
     ]
   }
 }

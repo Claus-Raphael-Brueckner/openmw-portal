@@ -852,9 +852,10 @@ namespace MWRender
         return false;
     }
 
-    osg::Vec2f PortalManager::computeHalfExtents(const MWWorld::Ptr& door) const
+    osg::Vec2f PortalManager::computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter) const
     {
         const osg::Vec2f fallback(96.f, 128.f);
+        outCenter = osg::Vec3f();
 
         VFS::Path::Normalized modelPath(door.getClass().getCorrectedModel(door));
         if (modelPath.empty())
@@ -873,6 +874,7 @@ namespace MWRender
             if (!bb.valid())
                 return fallback;
 
+            outCenter = bb.center();
             const float xSpan = std::abs(bb.xMax() - bb.xMin());
             const float ySpan = std::abs(bb.yMax() - bb.yMin());
             return osg::Vec2f(std::max(xSpan, ySpan) * 0.5f,
@@ -989,20 +991,18 @@ namespace MWRender
                 nifRootQuat = nifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
         }
 
-        osg::Vec2f halfExtents = computeHalfExtents(door);
+        osg::Vec3f modelCenter;
+        osg::Vec2f halfExtents = computeHalfExtents(door, modelCenter);
 
-        // Per-model offset in world space: portal quad center = door world position + worldOffset.
-        // Because the quad is a child of the door's PAT (which applies cellRefRot), we convert
-        // the world-space vector to PAT-local space by multiplying with cellRefRot.inverse().
+        // Default offset: BBox center (XZ only) places the quad at the geometric center of the
+        // door mesh in model-local space. Handles models whose origin is not at the center.
         const osg::Quat cellRefRot = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
-        osg::Vec3f localOffset;
+        osg::Vec3f localOffset(modelCenter.x(), 0.f, modelCenter.z());
         {
             std::string model = door.get<ESM::Door>()->mBase->mModel;
             Misc::StringUtils::lowerCaseInPlace(model);
             if (model.find("ex_nord_door_01") != std::string::npos)
-                localOffset = osg::Vec3f(10.f, 13.f, -15.f);  // door-local space, already tuned
-            else if (model.find("in_c_door_wood_square") != std::string::npos)
-                localOffset = cellRefRot.inverse() * osg::Vec3f(halfExtents.x(), 0.f, halfExtents.y());
+                localOffset = osg::Vec3f(10.f, 13.f, -15.f);  // manually tuned hinge offset
         }
         osg::ref_ptr<osg::MatrixTransform> quadNode = buildQuadNode(halfExtents, nifRootQuat, localOffset);
         // Clear any previously loaded door mesh children (happens when a locked door is unlocked
@@ -1068,7 +1068,7 @@ namespace MWRender
                         bestDistSq = distSq;
                         osg::Quat destCellRefRot = Misc::Convert::makeOsgQuat(dPos);
                         osg::Quat destNifRootQuat;
-                        osg::Vec3f destWorldOffset;
+                        osg::Vec3f destModelOffset;
                         if (!ref.mBase->mModel.empty())
                         {
                             try
@@ -1080,22 +1080,14 @@ namespace MWRender
                                 if (destNode)
                                 {
                                     destNifRootQuat = getNifRootQuat(destNode.get());
-                                    std::string destModel = ref.mBase->mModel;
-                                    Misc::StringUtils::lowerCaseInPlace(destModel);
-                                    if (destModel.find("in_c_door_wood_square") != std::string::npos)
+                                    osg::ComputeBoundsVisitor cv;
+                                    cv.setTraversalMask(~(Mask_ParticleSystem | Mask_Effect));
+                                    const_cast<osg::Node*>(destNode.get())->accept(cv);
+                                    const osg::BoundingBox& bb = cv.getBoundingBox();
+                                    if (bb.valid())
                                     {
-                                        osg::ComputeBoundsVisitor cv;
-                                        cv.setTraversalMask(~(Mask_ParticleSystem | Mask_Effect));
-                                        const_cast<osg::Node*>(destNode.get())->accept(cv);
-                                        const osg::BoundingBox& bb = cv.getBoundingBox();
-                                        if (bb.valid())
-                                        {
-                                            const float xSpan = std::abs(bb.xMax() - bb.xMin());
-                                            const float ySpan = std::abs(bb.yMax() - bb.yMin());
-                                            destWorldOffset = osg::Vec3f(
-                                                std::max(xSpan, ySpan) * 0.5f, 0.f,
-                                                std::abs(bb.zMax() - bb.zMin()) * 0.5f);
-                                        }
+                                        const osg::Vec3f c = bb.center();
+                                        destModelOffset = osg::Vec3f(c.x(), 0.f, c.z());
                                     }
                                 }
                             }
@@ -1107,7 +1099,7 @@ namespace MWRender
                                     destNifRootQuat = destNifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
                             }
                         }
-                        portal.destDoorPos = dPos.asVec3() + destWorldOffset;
+                        portal.destDoorPos = dPos.asVec3() + destCellRefRot * destModelOffset;
                         portal.destDoorRot = destCellRefRot * destNifRootQuat;
                     }
                 }

@@ -109,7 +109,7 @@ namespace MWRender
             bool approachActive = false; ///< ghost mode currently active for this portal
         };
 
-        osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door) const;
+        osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter) const;
         osg::ref_ptr<osg::MatrixTransform> buildQuadNode(const osg::Vec2f& halfExtents, const osg::Quat& nifRootQuat, const osg::Vec3f& localOffset = {}) const;
         bool isWithinBounds(const osg::Vec3f& playerPos, const Portal& portal) const;
 
