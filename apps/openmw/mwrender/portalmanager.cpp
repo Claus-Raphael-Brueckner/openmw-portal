@@ -873,15 +873,28 @@ namespace MWRender
             if (!bb.valid())
                 return fallback;
 
-            outCenter = bb.center();
             const float xSpan = std::abs(bb.xMax() - bb.xMin());
             const float ySpan = std::abs(bb.yMax() - bb.yMin());
-            // If the door geometry runs along Y instead of X, a -90° Z rotation is buried in a
-            // sub-node below what getNifRootQuat reads. Correct nifRot to match the actual opening.
-            if (ySpan > xSpan)
+            const float zSpan = std::abs(bb.zMax() - bb.zMin());
+            const osg::Vec3f c = bb.center();
+            // Use the BBox center for height (Z) centering. Only use the X center if it is
+            // large relative to the opening width — that indicates the model origin sits at a
+            // corner rather than at the geometric centre (e.g. in_c_door_wood_square).
+            const float halfWidth = std::max(xSpan, ySpan) * 0.5f;
+            // Sub-node -90° Z rotation: geometry runs along Y in model space (ySpan >> xSpan).
+            // Only correct when the root node reported no rotation of its own; if getNifRootQuat
+            // already returned a non-identity quaternion, the root accounts for the orientation
+            // and applying a second -90° Z would double-correct to -180°.
+            if (ySpan > xSpan && std::abs(inOutNifRot.w()) > 0.999f)
                 inOutNifRot = inOutNifRot * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
-            return osg::Vec2f(std::max(xSpan, ySpan) * 0.5f,
-                std::abs(bb.zMax() - bb.zMin()) * 0.5f);
+            // buildQuadNode uses rotate-then-translate (OSG row-vector convention), so localOffset
+            // becomes the quad center directly in the parent's local space.  Use all three BBox
+            // center components, filtering out values that are small relative to the opening width
+            // to avoid shifting the quad in directions that should be near-zero.
+            const float cx = (std::abs(c.x()) > halfWidth * 0.3f) ? c.x() : 0.f;
+            const float cy = (std::abs(c.y()) > halfWidth * 0.3f) ? c.y() : 0.f;
+            outCenter = osg::Vec3f(cx, cy, c.z());
+            return osg::Vec2f(halfWidth, zSpan * 0.5f);
         }
         catch (...)
         {
@@ -987,12 +1000,27 @@ namespace MWRender
         }
 
         osg::Vec3f modelCenter;
+        const osg::Quat nifRootQuatBeforeHeuristic = nifRootQuat;
         osg::Vec2f halfExtents = computeHalfExtents(door, modelCenter, nifRootQuat);
 
-        // Default offset: BBox center (XZ only) places the quad at the geometric center of the
-        // door mesh in model-local space. Handles models whose origin is not at the center.
+        {
+            double angle0; osg::Vec3d axis0;
+            nifRootQuatBeforeHeuristic.getRotate(angle0, axis0);
+            double angle; osg::Vec3d axis;
+            nifRootQuat.getRotate(angle, axis);
+            const auto& pos = door.getCellRef().getPosition();
+            Log(Debug::Info) << "Portal door model=" << modelPath
+                << " cell=" << (door.getCell() ? door.getCell()->getCell()->getDisplayName() : "?")
+                << " cellRefRotZ=" << osg::RadiansToDegrees(pos.rot[2])
+                << " halfExt=(" << halfExtents.x() << "," << halfExtents.y() << ")"
+                << " center=(" << modelCenter.x() << "," << modelCenter.z() << ")"
+                << " nifRootBefore=(" << axis0 << " " << osg::RadiansToDegrees(angle0) << "deg)"
+                << " nifRootAfter=(" << axis << " " << osg::RadiansToDegrees(angle) << "deg)";
+        }
+
+        // modelCenter is already the filtered (cx, 0, cz) offset from computeHalfExtents.
         const osg::Quat cellRefRot = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
-        osg::Vec3f localOffset(modelCenter.x(), 0.f, modelCenter.z());
+        osg::Vec3f localOffset = modelCenter;
         {
             std::string model = door.get<ESM::Door>()->mBase->mModel;
             Misc::StringUtils::lowerCaseInPlace(model);
@@ -1081,13 +1109,16 @@ namespace MWRender
                                     const osg::BoundingBox& bb = cv.getBoundingBox();
                                     if (bb.valid())
                                     {
-                                        const osg::Vec3f c = bb.center();
-                                        destModelOffset = osg::Vec3f(c.x(), 0.f, c.z());
                                         const float xSpan = std::abs(bb.xMax() - bb.xMin());
                                         const float ySpan = std::abs(bb.yMax() - bb.yMin());
-                                        if (ySpan > xSpan)
+                                        const float halfWidth = std::max(xSpan, ySpan) * 0.5f;
+                                        const osg::Vec3f c = bb.center();
+                                        if (ySpan > xSpan && std::abs(destNifRootQuat.w()) > 0.999f)
                                             destNifRootQuat = destNifRootQuat
                                                 * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
+                                        const float cx = (std::abs(c.x()) > halfWidth * 0.3f) ? c.x() : 0.f;
+                                        const float cy = (std::abs(c.y()) > halfWidth * 0.3f) ? c.y() : 0.f;
+                                        destModelOffset = osg::Vec3f(cx, cy, c.z());
                                     }
                                 }
                             }
