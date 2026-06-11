@@ -423,16 +423,14 @@ namespace MWRender
             return waterNode;
         }
 
-        // Extract the rotation quaternion from a NIF root node (if it carries a matrix transform).
-        // Returns identity if the root is a plain osg::Group (identity transform in the NIF).
+        // Returns the rotation of the NIF root node (identity if root is a plain Group).
         osg::Quat getNifRootQuat(const osg::Node* node)
         {
             const auto* mt = dynamic_cast<const osg::MatrixTransform*>(node);
             if (!mt)
                 return osg::Quat();
-            osg::Quat q;
+            osg::Quat q, so;
             osg::Vec3d t, s;
-            osg::Quat so;
             mt->getMatrix().decompose(t, q, s, so);
             return q;
         }
@@ -852,7 +850,8 @@ namespace MWRender
         return false;
     }
 
-    osg::Vec2f PortalManager::computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter) const
+    osg::Vec2f PortalManager::computeHalfExtents(
+        const MWWorld::Ptr& door, osg::Vec3f& outCenter, osg::Quat& inOutNifRot) const
     {
         const osg::Vec2f fallback(96.f, 128.f);
         outCenter = osg::Vec3f();
@@ -877,6 +876,10 @@ namespace MWRender
             outCenter = bb.center();
             const float xSpan = std::abs(bb.xMax() - bb.xMin());
             const float ySpan = std::abs(bb.yMax() - bb.yMin());
+            // If the door geometry runs along Y instead of X, a -90° Z rotation is buried in a
+            // sub-node below what getNifRootQuat reads. Correct nifRot to match the actual opening.
+            if (ySpan > xSpan)
+                inOutNifRot = inOutNifRot * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
             return osg::Vec2f(std::max(xSpan, ySpan) * 0.5f,
                 std::abs(bb.zMax() - bb.zMin()) * 0.5f);
         }
@@ -968,7 +971,7 @@ namespace MWRender
         if (!baseNode)
             return false;
 
-        // Load the NIF to get the root node's rotation (may differ from identity).
+        // Load the NIF to get the accumulated rotation from root to first geometry.
         osg::Quat nifRootQuat;
         VFS::Path::Normalized modelPath(door.getClass().getCorrectedModel(door));
         if (!modelPath.empty())
@@ -983,16 +986,8 @@ namespace MWRender
             catch (...) {}
         }
 
-        // in_hlaalu_loaddoor_01 bakes a -90° Z rotation below the NIF root node.
-        {
-            std::string model = door.get<ESM::Door>()->mBase->mModel;
-            Misc::StringUtils::lowerCaseInPlace(model);
-            if (model.find("in_hlaalu_loaddoor_01") != std::string::npos)
-                nifRootQuat = nifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
-        }
-
         osg::Vec3f modelCenter;
-        osg::Vec2f halfExtents = computeHalfExtents(door, modelCenter);
+        osg::Vec2f halfExtents = computeHalfExtents(door, modelCenter, nifRootQuat);
 
         // Default offset: BBox center (XZ only) places the quad at the geometric center of the
         // door mesh in model-local space. Handles models whose origin is not at the center.
@@ -1088,16 +1083,15 @@ namespace MWRender
                                     {
                                         const osg::Vec3f c = bb.center();
                                         destModelOffset = osg::Vec3f(c.x(), 0.f, c.z());
+                                        const float xSpan = std::abs(bb.xMax() - bb.xMin());
+                                        const float ySpan = std::abs(bb.yMax() - bb.yMin());
+                                        if (ySpan > xSpan)
+                                            destNifRootQuat = destNifRootQuat
+                                                * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
                                     }
                                 }
                             }
                             catch (...) {}
-                            {
-                                std::string destModel = ref.mBase->mModel;
-                                Misc::StringUtils::lowerCaseInPlace(destModel);
-                                if (destModel.find("in_hlaalu_loaddoor_01") != std::string::npos)
-                                    destNifRootQuat = destNifRootQuat * osg::Quat(osg::DegreesToRadians(-90.f), osg::Vec3f(0.f, 0.f, 1.f));
-                            }
                         }
                         portal.destDoorPos = dPos.asVec3() + destCellRefRot * destModelOffset;
                         portal.destDoorRot = destCellRefRot * destNifRootQuat;
