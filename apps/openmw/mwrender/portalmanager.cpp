@@ -1061,6 +1061,9 @@ namespace MWRender
 
         // Destination door lookup (cheap: in-memory iteration, no RTT construction).
         // destIsExterior and destDoorPos/Rot are needed by the streaming system and update().
+        // reverseArrival: where the player arrives in THIS cell when walking back through the
+        // dest portal. Same coordinate frame as pos — used below to test planeNormal direction.
+        osg::Vec3f reverseArrival = pos; // fallback: no flip if dest door not found
         {
             const ESM::RefId destCellId = door.getCellRef().getDestCell();
             portal.destCellId = destCellId;
@@ -1090,6 +1093,7 @@ namespace MWRender
                         if (distSq >= bestDistSq)
                             continue;
                         bestDistSq = distSq;
+                        reverseArrival = ref.mRef.getDoorDest().asVec3();
                         osg::Quat destCellRefRot = Misc::Convert::makeOsgQuat(dPos);
                         osg::Quat destNifRootQuat;
                         osg::Vec3f destModelOffset;
@@ -1133,7 +1137,9 @@ namespace MWRender
                         // need this correction when cellRefRotZ places destFwd antiparallel to arrival.
                         {
                             const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-                            const osg::Vec3f toArrival = portal.destPoint - portal.destDoorPos;
+                            // Use dPos (raw door spawn, no model-center offset) so the direction
+                            // into the destination cell is reliable regardless of NIF geometry.
+                            const osg::Vec3f toArrival = portal.destPoint - dPos.asVec3();
                             if (toArrival.length2() > 1.f && destFwd * toArrival < 0.f)
                             {
                                 destNifRootQuat = destNifRootQuat * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f));
@@ -1157,14 +1163,15 @@ namespace MWRender
             catch (...) {}
         }
 
-        // Sanity check: planeNormal must be antiparallel to destFwd for correct rendering.
-        // When cellRefRotZ places the source quad parallel to destFwd (dot > 0.5), flip by
-        // applying R_z(+180°) so the normal reverses. Threshold 0.5 prevents spurious flips
-        // for perpendicular pairs where floating-point noise in chained quaternion products
-        // yields a small positive dot (e.g. Velothi cellRefRotZ=180° gives dot ≈ 6e-8).
+        // planeNormal must face toward the approaching player in the source cell.
+        // reverseArrival is where the player appears in this cell when walking back through the
+        // dest portal — same coordinate frame as pos — giving a reliable approach direction.
+        // Flip when planeNormal points AWAY from the player (dot with toSourcePlayer < 0).
+        // This replaces the old destFwd-based condition, which could not distinguish buildings
+        // where both doors happen to face the same world direction (e.g. Council Club vs Aurelia).
         {
-            const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-            if (portal.planeNormal * destFwd > 0.5f)
+            const osg::Vec3f toSourcePlayer = reverseArrival - pos;
+            if (toSourcePlayer.length2() > 1.f && portal.planeNormal * toSourcePlayer < 0.f)
             {
                 nifRootQuat = nifRootQuat * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f));
                 const osg::Quat fullRotFixed = cellRefRot * nifRootQuat;
