@@ -1126,10 +1126,45 @@ namespace MWRender
                         }
                         portal.destDoorPos = dPos.asVec3() + destCellRefRot * destModelOffset;
                         portal.destDoorRot = destCellRefRot * destNifRootQuat;
+                        {
+                            double ang; osg::Vec3d ax;
+                            portal.destDoorRot.getRotate(ang, ax);
+                            const osg::Vec3f fwd = portal.destDoorRot * osg::Vec3f(0.f,-1.f,0.f);
+                            Log(Debug::Info) << "Portal dest door model=" << ref.mBase->mModel
+                                << " destCellRefRotZ=" << osg::RadiansToDegrees(dPos.rot[2])
+                                << " destDoorRot=(" << ax << " " << osg::RadiansToDegrees(ang) << "deg)"
+                                << " destFwd=(" << fwd << ")"
+                                << " destDoorPos=(" << portal.destDoorPos << ")";
+                        }
                     }
                 }
             }
             catch (...) {}
+        }
+
+        // Sanity check: planeNormal must be antiparallel to destFwd for correct rendering.
+        // The heuristic in computeHalfExtents applies a fixed R_z(-90°) correction for
+        // Y-dominant NIF roots. For some cellRefRotZ values (e.g. 0°/360°) this correction
+        // has the wrong sign, yielding planeNormal || destFwd instead of antiparallel.
+        // Detect this and flip by applying R_z(+180°) on top so the net correction becomes +90°.
+        // Only correct when the heuristic fired (|nifRootQuat.w| < 0.999 after correction).
+        if (std::abs(nifRootQuat.w()) < 0.999f)
+        {
+            const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
+            if (portal.planeNormal * destFwd > 0.f)
+            {
+                nifRootQuat = nifRootQuat * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f));
+                const osg::Quat fullRotFixed = cellRefRot * nifRootQuat;
+                portal.planeNormal = fullRotFixed * osg::Vec3f(0.f, -1.f, 0.f);
+                portal.invRot      = fullRotFixed.inverse();
+                baseNode->removeChild(quadNode);
+                quadNode = buildQuadNode(halfExtents, nifRootQuat, localOffset);
+                baseNode->addChild(quadNode);
+                portal.quadNode = quadNode;
+                Log(Debug::Info) << "Portal plane flip applied for cellRefRotZ="
+                    << osg::RadiansToDegrees(door.getCellRef().getPosition().rot[2])
+                    << " new planeNormal=(" << portal.planeNormal << ")";
+            }
         }
 
         // screenRes is always needed (portal shader reads it even before RTT is active).
@@ -1447,6 +1482,21 @@ namespace MWRender
                     osg::Vec3d(rttUp));
 
                 portal.rttNode->setViewMatrix(portalView);
+
+                // Debug: log camera placement once per portal activation.
+                if (portal.cooldown > 0)
+                {
+                    Log(Debug::Info) << "Portal RTT cam"
+                        << " idx=" << i
+                        << " local=(" << local.x() << "," << local.y() << "," << local.z() << ")"
+                        << " camPos=(" << camPos << ")"
+                        << " rttLook=(" << rttLook << ")"
+                        << " forward=(" << forward << ")"
+                        << " invRot=(" << portal.invRot._v[0] << "," << portal.invRot._v[1] << "," << portal.invRot._v[2] << "," << portal.invRot._v[3] << ")"
+                        << " planeNormal=(" << portal.planeNormal << ")"
+                        << " eyePos=(" << eyePos << ")"
+                        << " quadCenter=(" << portal.quadCenter << ")";
+                }
 
                 // Use a fixed exterior-friendly projection: same FOV/aspect as the main camera,
                 // near=1 unit (smaller than interior near to avoid clipping nearby exterior geometry),
