@@ -1127,11 +1127,10 @@ namespace MWRender
                         }
                         portal.destDoorPos = dPos.asVec3() + destCellRefRot * destModelOffset;
                         portal.destDoorRot = destCellRefRot * destNifRootQuat;
-                        // Same flip logic as for the source door's planeNormal:
-                        // if the heuristic was applied and the resulting destFwd points AWAY from
-                        // the destination interior (i.e. away from the teleport arrival point),
-                        // the clip plane would cut all destination content — apply R_z(+180°) to fix.
-                        if (std::abs(destNifRootQuat.w()) < 0.999f)
+                        // If destFwd points AWAY from the teleport arrival point, the clip plane
+                        // would cut all destination content — flip by R_z(+180°) to correct.
+                        // No |w| guard here: flat-door NIFs (identity root, no heuristic) also
+                        // need this correction when cellRefRotZ places destFwd antiparallel to arrival.
                         {
                             const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
                             const osg::Vec3f toArrival = portal.destPoint - portal.destDoorPos;
@@ -1159,14 +1158,10 @@ namespace MWRender
         }
 
         // Sanity check: planeNormal must be antiparallel to destFwd for correct rendering.
-        // The heuristic in computeHalfExtents applies a fixed R_z(-90°) correction for
-        // Y-dominant NIF roots. For some cellRefRotZ values (e.g. 0°/360°) this correction
-        // has the wrong sign, yielding planeNormal || destFwd instead of antiparallel.
-        // Detect this and flip by applying R_z(+180°) on top so the net correction becomes +90°.
-        // Only correct when the heuristic fired (|nifRootQuat.w| < 0.999 after correction).
-        // Threshold 0.5 avoids spurious flips when planeNormal ⊥ destFwd (dot ≈ 0 due to
-        // floating-point noise from chained quaternion multiplications, e.g. cellRefRotZ=180°).
-        if (std::abs(nifRootQuat.w()) < 0.999f)
+        // When cellRefRotZ places the source quad parallel to destFwd (dot > 0.5), flip by
+        // applying R_z(+180°) so the normal reverses. Threshold 0.5 prevents spurious flips
+        // for perpendicular pairs where floating-point noise in chained quaternion products
+        // yields a small positive dot (e.g. Velothi cellRefRotZ=180° gives dot ≈ 6e-8).
         {
             const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
             if (portal.planeNormal * destFwd > 0.5f)
