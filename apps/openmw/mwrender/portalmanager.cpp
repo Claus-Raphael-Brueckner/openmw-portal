@@ -1011,6 +1011,7 @@ namespace MWRender
             const auto& pos = door.getCellRef().getPosition();
             Log(Debug::Info) << "Portal door model=" << modelPath
                 << " cell=" << (door.getCell() ? door.getCell()->getCell()->getDisplayName() : "?")
+                << " → dest=" << door.getCellRef().getDestCell().toDebugString()
                 << " cellRefRotZ=" << osg::RadiansToDegrees(pos.rot[2])
                 << " halfExt=(" << halfExtents.x() << "," << halfExtents.y() << ")"
                 << " center=(" << modelCenter.x() << "," << modelCenter.z() << ")"
@@ -1163,10 +1164,12 @@ namespace MWRender
         // has the wrong sign, yielding planeNormal || destFwd instead of antiparallel.
         // Detect this and flip by applying R_z(+180°) on top so the net correction becomes +90°.
         // Only correct when the heuristic fired (|nifRootQuat.w| < 0.999 after correction).
+        // Threshold 0.5 avoids spurious flips when planeNormal ⊥ destFwd (dot ≈ 0 due to
+        // floating-point noise from chained quaternion multiplications, e.g. cellRefRotZ=180°).
         if (std::abs(nifRootQuat.w()) < 0.999f)
         {
             const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-            if (portal.planeNormal * destFwd > 0.f)
+            if (portal.planeNormal * destFwd > 0.5f)
             {
                 nifRootQuat = nifRootQuat * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f));
                 const osg::Quat fullRotFixed = cellRefRot * nifRootQuat;
@@ -1498,19 +1501,18 @@ namespace MWRender
 
                 portal.rttNode->setViewMatrix(portalView);
 
-                // Debug: log camera placement once per portal activation.
-                if (portal.cooldown > 0)
+                // Debug: log camera placement once per portal activation (cooldown starts at 30).
+                if (portal.cooldown == 30)
                 {
+                    const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
                     Log(Debug::Info) << "Portal RTT cam"
                         << " idx=" << i
+                        << " dest=\"" << portal.destCellId.toDebugString() << "\""
+                        << " planeNormal=(" << portal.planeNormal << ")"
+                        << " destFwd=(" << destFwd << ")"
                         << " local=(" << local.x() << "," << local.y() << "," << local.z() << ")"
                         << " camPos=(" << camPos << ")"
-                        << " rttLook=(" << rttLook << ")"
-                        << " forward=(" << forward << ")"
-                        << " invRot=(" << portal.invRot._v[0] << "," << portal.invRot._v[1] << "," << portal.invRot._v[2] << "," << portal.invRot._v[3] << ")"
-                        << " planeNormal=(" << portal.planeNormal << ")"
-                        << " eyePos=(" << eyePos << ")"
-                        << " quadCenter=(" << portal.quadCenter << ")";
+                        << " rttLook=(" << rttLook << ")";
                 }
 
                 // Use a fixed exterior-friendly projection: same FOV/aspect as the main camera,
