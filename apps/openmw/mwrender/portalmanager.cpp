@@ -1126,6 +1126,21 @@ namespace MWRender
                         }
                         portal.destDoorPos = dPos.asVec3() + destCellRefRot * destModelOffset;
                         portal.destDoorRot = destCellRefRot * destNifRootQuat;
+                        // Same flip logic as for the source door's planeNormal:
+                        // if the heuristic was applied and the resulting destFwd points AWAY from
+                        // the destination interior (i.e. away from the teleport arrival point),
+                        // the clip plane would cut all destination content — apply R_z(+180°) to fix.
+                        if (std::abs(destNifRootQuat.w()) < 0.999f)
+                        {
+                            const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
+                            const osg::Vec3f toArrival = portal.destPoint - portal.destDoorPos;
+                            if (toArrival.length2() > 1.f && destFwd * toArrival < 0.f)
+                            {
+                                destNifRootQuat = destNifRootQuat * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f));
+                                portal.destDoorRot = destCellRefRot * destNifRootQuat;
+                                Log(Debug::Info) << "Portal dest door flip applied: destFwd was antiparallel to arrival vector";
+                            }
+                        }
                         {
                             double ang; osg::Vec3d ax;
                             portal.destDoorRot.getRotate(ang, ax);
