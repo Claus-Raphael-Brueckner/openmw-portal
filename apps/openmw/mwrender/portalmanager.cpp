@@ -4,6 +4,7 @@
 #include "util.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <sstream>
@@ -26,8 +27,10 @@
 #include <osg/LightSource>
 #include <osg/Material>
 #include <osg/MatrixTransform>
+#include <osg/PolygonMode>
 #include <osg/PolygonOffset>
 #include <osg/PositionAttitudeTransform>
+#include <osg/ShapeDrawable>
 #include <osg/StateSet>
 #include <osg/Texture2D>
 
@@ -127,6 +130,41 @@ namespace MWRender
             tex->setFilter(osg::Texture::MIN_FILTER, osg::Texture::NEAREST);
             tex->setFilter(osg::Texture::MAG_FILTER, osg::Texture::NEAREST);
             return tex;
+        }
+
+        // Magenta wireframe group visualising the three portal collision shapes:
+        // one floor box and two guide-wall cylinders (Mask_Debug → main view only).
+        [[maybe_unused]] osg::ref_ptr<osg::Group> buildPortalCollisionDebug(
+            const osg::Vec3f& floorCenter,
+            const osg::Vec3f& wallLeft, const osg::Vec3f& wallRight,
+            float wallRadius, float wallHalfH)
+        {
+            osg::ref_ptr<osg::Group> grp = new osg::Group;
+            grp->setNodeMask(Mask_Debug);
+
+            osg::ref_ptr<osg::StateSet> ss = grp->getOrCreateStateSet();
+            ss->setAttributeAndModes(
+                new osg::PolygonMode(osg::PolygonMode::FRONT_AND_BACK, osg::PolygonMode::LINE),
+                osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+            ss->setMode(GL_LIGHTING, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+
+            const osg::Vec4f magenta(1.f, 0.f, 1.f, 1.f);
+            auto addShape = [&](osg::Shape* shape)
+            {
+                osg::ref_ptr<osg::ShapeDrawable> sd = new osg::ShapeDrawable(shape);
+                sd->setColor(magenta);
+                osg::ref_ptr<osg::Geode> geode = new osg::Geode;
+                geode->addDrawable(sd);
+                grp->addChild(geode);
+            };
+
+            // btBoxShape half-extents (300,300,10) → full size 600×600×20
+            addShape(new osg::Box(floorCenter, 600.f, 600.f, 20.f));
+            // btCylinderShapeZ half-extents (radius,radius,halfH) → full height = 2*halfH
+            addShape(new osg::Cylinder(wallLeft,  wallRadius, 2.f * wallHalfH));
+            addShape(new osg::Cylinder(wallRight, wallRadius, 2.f * wallHalfH));
+
+            return grp;
         }
 
         // CullCallback on the portal water PAT: binds reflection (unit 1) and optionally
@@ -1090,7 +1128,7 @@ namespace MWRender
         // lastSide is therefore initialized from the old cell's player position and may be wrong.
         // The cooldown lets the player arrive so eyePos-based lastSide can stabilize before the
         // trigger is armed. 30 frames ≈ 0.5 s at 60 fps is enough for the cell transition to settle.
-        portal.cooldown    = 30;
+        portal.cooldown    = 2;
 
         // Destination door lookup (cheap: in-memory iteration, no RTT construction).
         // destIsExterior and destDoorPos/Rot are needed by the streaming system and update().
@@ -1580,8 +1618,8 @@ namespace MWRender
 
                 portal.rttNode->setViewMatrix(portalView);
 
-                // Debug: log camera placement once per portal activation (cooldown starts at 30).
-                if (portal.cooldown == 30)
+                // Debug: log camera placement once per portal activation (cooldown starts at 2).
+                if (portal.cooldown == 2)
                 {
                     Log(Debug::Info) << "Portal RTT cam"
                         << " idx=" << i
@@ -1636,12 +1674,14 @@ namespace MWRender
             const bool side = (dist >= 0.f);
 
             // --- Approach ghost mode ---
-            // When the player is within the approach zone (positive side, within bounds) but
-            // hasn't crossed yet, strip CollisionType_World from the player's collision mask
-            // so cave-entrance rocks no longer block the path. A portal-guide floor box keeps
-            // the player from falling through the interior floor while World collision is gone.
+            // Strips CollisionType_World so cave-entrance rocks don't block the path.
+            // Only needed when the player is OUTSIDE approaching an interior portal
+            // (destIsExterior=false). For interior→exterior portals the approach side
+            // is inside a building where door frames have no blocking collision geometry,
+            // so ghost mode is unnecessary and causes the indoor floor to disappear.
             constexpr float kApproachDist = 180.f;
             const bool inApproachZone = !portal.noCollision
+                && !portal.destIsExterior
                 && portal.lastSide && dist >= 0.f && dist < kApproachDist
                 && isWithinBounds(eyePos, portal);
 
@@ -1668,6 +1708,22 @@ namespace MWRender
                     // Two angled guide walls funnelling the player toward the portal opening.
                     world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
                         portal.halfExtents.x(), portal.halfExtents.y());
+
+                    // Debug: show the three collision shapes as magenta wireframe (Mask_Debug).
+                    // (disabled; uncomment to re-enable)
+                    // {
+                    //     constexpr float wallRadius = 45.f;
+                    //     const osg::Quat portalRot = portal.invRot.inverse();
+                    //     auto toWorld = [&](float localX) -> osg::Vec3f {
+                    //         return portal.planePoint + portalRot * osg::Vec3f(localX, -wallRadius, 0.f);
+                    //     };
+                    //     mDebugShapesNode = buildPortalCollisionDebug(
+                    //         floorCenter,
+                    //         toWorld(-(portal.halfExtents.x() + wallRadius)),
+                    //         toWorld( (portal.halfExtents.x() + wallRadius)),
+                    //         wallRadius, portal.halfExtents.y());
+                    //     mRttParent->addChild(mDebugShapesNode);
+                    // }
                 }
             }
             else if (!inApproachZone && portal.approachActive)
@@ -1680,21 +1736,68 @@ namespace MWRender
                     world->setPlayerGhostMode(false);
                     world->removePortalFloor();
                     world->removePortalGuideWalls();
+                    if (mDebugShapesNode)
+                    {
+                        mRttParent->removeChild(mDebugShapesNode);
+                        mDebugShapesNode = nullptr;
+                    }
                 }
             }
 
             // Trigger only when crossing from outside (lastSide=true) to inside.
             if (portal.lastSide && !side && isWithinBounds(eyePos, portal))
             {
-                // Clean up ghost mode before the cell change destroys this portal.
-                if (portal.approachActive)
+                // --- Rapid-crossing diagnostics ---
+                const double nowMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                const double dtMs = nowMs - mLastCrossingMs;
+                if (dtMs < 2000.0)
                 {
-                    portal.approachActive = false;
+                    Log(Debug::Warning) << "[Portal] Rapid crossing dt=" << (int)dtMs << "ms"
+                        << "  dest=" << portal.destCellId.toDebugString()
+                        << "  portal.approachActive=" << portal.approachActive
+                        << "  mGhostModeActive=" << mGhostModeActive
+                        << "  portal.cooldown=" << portal.cooldown
+                        << "  dist=" << dist;
+                    for (size_t j = 0; j < mPortals.size(); ++j)
+                    {
+                        const auto& p = mPortals[j];
+                        const float pd = (eyePos - p.planePoint) * p.planeNormal;
+                        const bool pInZone = !p.noCollision && p.lastSide
+                            && pd >= 0.f && pd < kApproachDist && isWithinBounds(eyePos, p);
+                        Log(Debug::Warning) << "  [p" << j << "]"
+                            << " dest=" << p.destCellId.toDebugString()
+                            << " approachActive=" << p.approachActive
+                            << " cooldown=" << p.cooldown
+                            << " dist=" << pd
+                            << " inZone=" << pInZone
+                            << " noCollision=" << p.noCollision;
+                    }
+                }
+                mLastCrossingMs = nowMs;
+
+                // Clean up ghost mode before the cell change destroys all portals.
+                // Use mGhostModeActive rather than portal.approachActive: when two portals'
+                // cooldowns expire in the same frame, portal A may activate ghost mode and
+                // portal B may cross — portal B's approachActive is false (went from cooldown
+                // directly to crossing) so the old guard left ghost mode active after the cell
+                // change, causing the player to fall through the floor in the new cell.
+                if (mGhostModeActive)
+                {
+                    Log(Debug::Warning) << "[Portal] ghost mode cleanup at crossing"
+                        << " (mGhostModeActive=true, portal.approachActive=" << portal.approachActive << ")";
+                    for (auto& p : mPortals)
+                        p.approachActive = false;
                     mGhostModeActive = false;
                     MWBase::World* world = MWBase::Environment::get().getWorld();
                     world->setPlayerGhostMode(false);
                     world->removePortalFloor();
                     world->removePortalGuideWalls();
+                    if (mDebugShapesNode)
+                    {
+                        mRttParent->removeChild(mDebugShapesNode);
+                        mDebugShapesNode = nullptr;
+                    }
                 }
                 // Use cached values — never re-dereference portal.door here; its CellRef
                 // may be stale if a lock/unlock cycle occurred since the portal was created.

@@ -135,6 +135,8 @@ namespace MWRender
         osg::Vec4f  mExteriorDiffuse       = osg::Vec4f(0.85f, 0.80f, 0.70f, 1.f);
         osg::Vec3f  mExteriorSunDir        = osg::Vec3f(0.5f, -0.5f, 1.f);
         float       mNearClip              = 1.f;
+        osg::ref_ptr<osg::Group> mDebugShapesNode; ///< Mask_Debug wireframe for active portal collision geometry
+        double      mLastCrossingMs        = -1e9; ///< steady_clock ms at last portal crossing (for rapid-crossing log)
     };
 
 }
