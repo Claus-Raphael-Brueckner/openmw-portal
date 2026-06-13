@@ -1,4 +1,3 @@
-<img width="1920" height="1080" alt="suran" src="https://github.com/user-attachments/assets/f4a09c5f-75fb-433d-ab40-fa0602776c05" />
 OpenMW — Portal Rendering Fork
 ===============================
 
