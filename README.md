@@ -1,3 +1,4 @@
+<img width="1920" height="1080" alt="suran" src="https://github.com/user-attachments/assets/f4a09c5f-75fb-433d-ab40-fa0602776c05" />
 OpenMW — Portal Rendering Fork
 ===============================
 
@@ -5,6 +6,8 @@ OpenMW — Portal Rendering Fork
 > See [README-portal.md](README-portal.md) for details.
 
 ---
+
+<img width="1920" height="1080" alt="suran" src="https://github.com/user-attachments/assets/56fdbb6f-8719-4305-9566-45965ce6af10" />
 
 OpenMW
 ======
