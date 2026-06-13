@@ -1013,15 +1013,6 @@ namespace MWRender
                 return false;
         }
 
-        // Doors with non-zero X or Y rotation are tilted / embedded at an angle and cannot
-        // be represented by a flat axis-aligned portal quad — skip them entirely.
-        {
-            const ESM::Position& p = door.getCellRef().getPosition();
-            constexpr float kRotTol = 0.017f; // ~1 degree
-            if (std::abs(p.rot[0]) > kRotTol || std::abs(p.rot[1]) > kRotTol)
-                return false;
-        }
-
         osg::Group* baseNode = door.getRefData().getBaseNode();
         if (!baseNode)
             return false;
@@ -1557,36 +1548,31 @@ namespace MWRender
             // Maps the player's transform relative to the source portal into destination space.
             if (portal.rttNode)
             {
-                const osg::Vec3f diff  = eyePos - portal.quadCenter;
-                const osg::Vec3f local = portal.invRot * diff;
-                // Clamp local.y away from zero so the camera never clips through the portal.
-                // For outdoor portal local.y < 0 (player in front); for indoor local.y > 0.
-                const float ly = (local.y() < 0.f)
-                    ? std::min(local.y(), -10.f)
-                    : std::max(local.y(),  10.f);
+                // Full portal transformation quaternion: maps source portal local frame to
+                // destination frame for any relative orientation (tilted, horizontal, etc.).
+                // Quat(PI, Z) accounts for source and destination facing opposite directions —
+                // validated to match the old per-component formula for the standard upright case.
+                const osg::Quat portalRot = portal.destDoorRot
+                    * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f))
+                    * portal.invRot;
 
-                const osg::Vec3f forward = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-                const osg::Vec3f right   = portal.destDoorRot * osg::Vec3f(1.f,  0.f, 0.f);
-                const osg::Vec3f upVec   = portal.destDoorRot * osg::Vec3f(0.f,  0.f, 1.f);
+                const osg::Vec3f diff      = eyePos - portal.quadCenter;
+                const osg::Vec3f rawOffset = portalRot * diff;
 
-                const float lyAbs = std::abs(ly);
+                // Clamp depth along destFwd to prevent the virtual camera clipping through
+                // the portal. Works for any portal orientation including tilted/horizontal.
+                const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
+                const float rawDepth     = rawOffset * destFwd;
+                const float clampedDepth = (rawDepth < 0.f)
+                    ? std::min(rawDepth, -10.f)
+                    : std::max(rawDepth,  10.f);
+                const osg::Vec3f camPos = portal.destDoorPos + rawOffset
+                    + destFwd * (clampedDepth - rawDepth);
 
-                const osg::Vec3f camPos = portal.destDoorPos
-                    - forward * lyAbs
-                    - right   * local.x()
-                    + upVec   * local.z();
-
-                // RTT camera mirrors the player's lateral look angle through the portal.
-                // Source and destination doors may have opposite local-y conventions, so we
-                // take x/z (lateral) from the transformed player look but force y = -1
-                // (destination convention: local -y = into cave), mirroring how the position
-                // formula uses lyAbs to always displace the camera in the forward direction.
-                // Both doors use local -y = forward but face opposite world directions.
-                // Flip x (mirror) and y (opposite facing), keep z: 180-deg rotation around portal Z.
-                const osg::Vec3f srcLocal = portal.invRot * playerLook;
-                const osg::Vec3f rttLook = portal.destDoorRot * osg::Vec3f(-srcLocal.x(), -srcLocal.y(), srcLocal.z());
-                // Fixed portal up avoids gimbal lock when rttLook approaches world-up.
-                const osg::Vec3f rttUp = upVec;
+                const osg::Vec3f rttLook = portalRot * playerLook;
+                // Map player up through the portal so camera roll is physically consistent.
+                // playerUp is always perpendicular to playerLook so lookAt is never degenerate.
+                const osg::Vec3f rttUp   = portalRot * playerUp;
                 const osg::Matrixd portalView = osg::Matrix::lookAt(
                     osg::Vec3d(camPos),
                     osg::Vec3d(camPos + rttLook * 400.f),
@@ -1597,13 +1583,12 @@ namespace MWRender
                 // Debug: log camera placement once per portal activation (cooldown starts at 30).
                 if (portal.cooldown == 30)
                 {
-                    const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
                     Log(Debug::Info) << "Portal RTT cam"
                         << " idx=" << i
                         << " dest=\"" << portal.destCellId.toDebugString() << "\""
                         << " planeNormal=(" << portal.planeNormal << ")"
                         << " destFwd=(" << destFwd << ")"
-                        << " local=(" << local.x() << "," << local.y() << "," << local.z() << ")"
+                        << " rawOffset=(" << rawOffset << ")"
                         << " camPos=(" << camPos << ")"
                         << " rttLook=(" << rttLook << ")";
                 }
