@@ -619,7 +619,8 @@ namespace MWPhysics
             found->second->setGhostMode(ghost);
     }
 
-    void PhysicsSystem::addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth)
+    void PhysicsSystem::addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth,
+        const osg::Quat& rotation)
     {
         removePortalFloor();
         mPortalFloorShape = std::make_unique<btBoxShape>(btVector3(halfWidth, halfDepth, 10.f));
@@ -627,7 +628,8 @@ namespace MWPhysics
         mPortalFloorObject->setCollisionShape(mPortalFloorShape.get());
         btTransform tr;
         tr.setIdentity();
-        tr.setOrigin(btVector3(center.x(), center.y(), center.z()));
+        tr.setOrigin(Misc::Convert::toBullet(center));
+        tr.setRotation(Misc::Convert::toBullet(rotation));
         mPortalFloorObject->setWorldTransform(tr);
         // CollisionType_PortalGuide: included in the player's ghost-mode mask so the player
         // still lands on this box when CollisionType_World (interior floor) is stripped.

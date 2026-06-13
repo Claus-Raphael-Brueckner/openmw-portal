@@ -405,7 +405,8 @@ namespace MWWorld
 
         bool toggleCollisionMode() override;
         void setPlayerGhostMode(bool ghost) override;
-        void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth) override;
+        void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth,
+            const osg::Quat& rotation) override;
         void removePortalFloor() override;
         void addPortalGuideWalls(const osg::Vec3f& planePoint, const osg::Quat& portalRot,
             float halfWidth, float halfHeight) override;

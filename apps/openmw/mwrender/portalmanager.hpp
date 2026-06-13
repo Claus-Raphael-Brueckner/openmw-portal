@@ -105,9 +105,10 @@ namespace MWRender
             osg::ref_ptr<osg::Light>         sunLight;        ///< updated each frame with current sun
             osg::ref_ptr<osg::LightModel>    lightModelAttr;  ///< updated each frame with current ambient
             float waterHeight = 0.f;
-            bool destIsExterior = false;
-            bool approachActive = false; ///< ghost mode currently active for this portal
-            bool noCollision    = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
+            bool destIsExterior  = false;
+            bool approachActive  = false; ///< ghost mode currently active for this portal
+            bool noCollision     = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
+            bool needsFlatFloor  = false; ///< always add flat floor box at portal sill (e.g. ex_cave_door_01)
         };
 
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter, osg::Quat& inOutNifRot) const;

@@ -202,7 +202,8 @@ namespace MWPhysics
 
         /// Add/remove a thin floor box below a portal door so the player doesn't fall
         /// through the interior floor when ghost mode strips CollisionType_World.
-        void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth);
+        void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth,
+            const osg::Quat& rotation);
         void removePortalFloor();
 
         /// Add two angled guide walls that funnel the player toward the portal opening.

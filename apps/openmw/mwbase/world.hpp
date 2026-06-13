@@ -323,7 +323,8 @@ namespace MWBase
 
         virtual bool toggleCollisionMode() = 0;
         virtual void setPlayerGhostMode(bool ghost) = 0;
-        virtual void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth) = 0;
+        virtual void addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth,
+            const osg::Quat& rotation) = 0;
         virtual void removePortalFloor() = 0;
         virtual void addPortalGuideWalls(const osg::Vec3f& planePoint, const osg::Quat& portalRot,
             float halfWidth, float halfHeight) = 0;

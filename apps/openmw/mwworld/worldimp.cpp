@@ -1544,9 +1544,10 @@ namespace MWWorld
         mPhysics->setPlayerGhostMode(ghost);
     }
 
-    void World::addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth)
+    void World::addPortalFloor(const osg::Vec3f& center, float halfWidth, float halfDepth,
+        const osg::Quat& rotation)
     {
-        mPhysics->addPortalFloor(center, halfWidth, halfDepth);
+        mPhysics->addPortalFloor(center, halfWidth, halfDepth, rotation);
     }
 
     void World::removePortalFloor()

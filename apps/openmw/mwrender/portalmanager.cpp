@@ -135,7 +135,8 @@ namespace MWRender
         // Magenta wireframe group visualising the three portal collision shapes:
         // one floor box and two guide-wall cylinders (Mask_Debug → main view only).
         [[maybe_unused]] osg::ref_ptr<osg::Group> buildPortalCollisionDebug(
-            const osg::Vec3f& floorCenter,
+            bool hasFloor, const osg::Vec3f& floorCenter, const osg::Quat& floorRot,
+            float floorHalfX, float floorHalfY,
             const osg::Vec3f& wallLeft, const osg::Vec3f& wallRight,
             float wallRadius, float wallHalfH)
         {
@@ -149,20 +150,30 @@ namespace MWRender
             ss->setMode(GL_LIGHTING, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
 
             const osg::Vec4f magenta(1.f, 0.f, 1.f, 1.f);
-            auto addShape = [&](osg::Shape* shape)
+            auto addShape = [&](osg::Group* parent, osg::Shape* shape)
             {
                 osg::ref_ptr<osg::ShapeDrawable> sd = new osg::ShapeDrawable(shape);
                 sd->setColor(magenta);
                 osg::ref_ptr<osg::Geode> geode = new osg::Geode;
                 geode->addDrawable(sd);
-                grp->addChild(geode);
+                parent->addChild(geode);
             };
 
-            // btBoxShape half-extents (300,300,10) → full size 600×600×20
-            addShape(new osg::Box(floorCenter, 600.f, 600.f, 20.f));
+            if (hasFloor)
+            {
+                // Wrap floor box in a MatrixTransform so the ramp tilt is visualised correctly.
+                osg::ref_ptr<osg::MatrixTransform> mt = new osg::MatrixTransform;
+                osg::Matrix m;
+                m.setRotate(floorRot);
+                m.setTrans(floorCenter);
+                mt->setMatrix(m);
+                // Box origin is (0,0,0) in local space; full size = 2*half-extents, thickness 20
+                addShape(mt.get(), new osg::Box(osg::Vec3f(), floorHalfX * 2.f, floorHalfY * 2.f, 20.f));
+                grp->addChild(mt);
+            }
             // btCylinderShapeZ half-extents (radius,radius,halfH) → full height = 2*halfH
-            addShape(new osg::Cylinder(wallLeft,  wallRadius, 2.f * wallHalfH));
-            addShape(new osg::Cylinder(wallRight, wallRadius, 2.f * wallHalfH));
+            addShape(grp.get(), new osg::Cylinder(wallLeft,  wallRadius, 2.f * wallHalfH));
+            addShape(grp.get(), new osg::Cylinder(wallRight, wallRadius, 2.f * wallHalfH));
 
             return grp;
         }
@@ -1284,6 +1295,12 @@ namespace MWRender
             if (model.find("ex_t_") != std::string::npos || model.find("in_t_") != std::string::npos)
                 portal.noCollision = true;
 
+            // Cave doors sit flush with the ground; add a flat floor box at the portal sill
+            // so ghost mode doesn't drop the player through the terrain.
+            if (model.find("ex_cave_door") != std::string::npos
+             || model.find("in_cave_door") != std::string::npos)
+                portal.needsFlatFloor = true;
+
             if (model.find("ex_imp_loaddoor_02") != std::string::npos
              || model.find("ex_redoran_hut_01_a") != std::string::npos)
             {
@@ -1701,25 +1718,81 @@ namespace MWRender
                 {
                     MWBase::World* world = MWBase::Environment::get().getWorld();
                     world->setPlayerGhostMode(true);
+
+                    bool hasRamp = false;
+                    osg::Vec3f rampCenter;
+                    osg::Quat  rampRot;
+                    float halfRampWidth = 0.f, halfRampLen = 0.f;
+
+                    const float portalSillZ = portal.planePoint.z() - portal.halfExtents.y();
+
+                    if (portal.needsFlatFloor)
+                    {
+                        // Original flat floor: 300×300 box placed 5 units below the portal sill.
+                        hasRamp = true;
+                        halfRampWidth = 300.f;
+                        halfRampLen   = 300.f;
+                        rampCenter    = osg::Vec3f(portal.planePoint.x(), portal.planePoint.y(),
+                                                   portalSillZ - 5.f);
+                        // rampRot stays identity (flat box)
+                        world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
+                    }
+                    // If the portal sill is more than ~1 m above the player's feet, add a ramp.
+                    // The ramp top surface passes through playerPos, portal-bottom-left, and
+                    // portal-bottom-right — the box is tilted to match that plane exactly.
+                    else if (portalSillZ - playerPos.z() > 50.f)
+                    {
+                        const osg::Vec3f sillMid(portal.planePoint.x(), portal.planePoint.y(), portalSillZ);
+                        const osg::Vec3f rampVec = sillMid - playerPos;
+                        const float rampLen = rampVec.length();
+                        if (rampLen > 1.f)
+                        {
+                            const osg::Vec3f rampSlopeDir = rampVec / rampLen;
+
+                            // Portal width axis in world space, orthogonalized against slope
+                            osg::Vec3f widthDir = portal.invRot.inverse() * osg::Vec3f(1.f, 0.f, 0.f);
+                            widthDir = widthDir - rampSlopeDir * (widthDir * rampSlopeDir);
+                            widthDir.normalize();
+
+                            // Ramp surface normal: rampSlopeDir × widthDir (points away from walkable side)
+                            const osg::Vec3f rampUp = rampSlopeDir ^ widthDir;
+
+                            // Box local axes: X→widthDir, Y→(-rampSlopeDir), Z→rampUp
+                            // OSG row-vector convention: each row is the world target of that local axis
+                            const osg::Matrix rotMat(
+                                 widthDir.x(),       widthDir.y(),       widthDir.z(),      0.0,
+                                -rampSlopeDir.x(),  -rampSlopeDir.y(),  -rampSlopeDir.z(),  0.0,
+                                 rampUp.x(),          rampUp.y(),          rampUp.z(),       0.0,
+                                 0.0,                 0.0,                 0.0,               1.0
+                            );
+                            rampRot.set(rotMat);
+                            halfRampWidth = portal.halfExtents.x() + 80.f;
+                            halfRampLen   = rampLen * 0.5f;
+                            // Center: midpoint of playerPos→sillMid, offset inward by half-thickness (10)
+                            rampCenter = (playerPos + sillMid) * 0.5f - rampUp * 10.f;
+                            world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
+                            hasRamp = true;
+                        }
+                    }
+
                     // Two angled guide walls funnelling the player toward the portal opening.
                     world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
                         portal.halfExtents.x(), portal.halfExtents.y());
 
-                    // Debug: show the three collision shapes as magenta wireframe (Mask_Debug).
-                    // (disabled; uncomment to re-enable)
-                    // {
-                    //     constexpr float wallRadius = 45.f;
-                    //     const osg::Quat portalRot = portal.invRot.inverse();
-                    //     auto toWorld = [&](float localX) -> osg::Vec3f {
-                    //         return portal.planePoint + portalRot * osg::Vec3f(localX, -wallRadius, 0.f);
-                    //     };
-                    //     mDebugShapesNode = buildPortalCollisionDebug(
-                    //         floorCenter,
-                    //         toWorld(-(portal.halfExtents.x() + wallRadius)),
-                    //         toWorld( (portal.halfExtents.x() + wallRadius)),
-                    //         wallRadius, portal.halfExtents.y());
-                    //     mRttParent->addChild(mDebugShapesNode);
-                    // }
+                    // Debug: show collision shapes as magenta wireframe.
+                    {
+                        constexpr float wallRadius = 45.f;
+                        const osg::Quat portalRot = portal.invRot.inverse();
+                        auto toWorld = [&](float localX) -> osg::Vec3f {
+                            return portal.planePoint + portalRot * osg::Vec3f(localX, -wallRadius, 0.f);
+                        };
+                        mDebugShapesNode = buildPortalCollisionDebug(
+                            hasRamp, rampCenter, rampRot, halfRampWidth, halfRampLen,
+                            toWorld(-(portal.halfExtents.x() + wallRadius)),
+                            toWorld( (portal.halfExtents.x() + wallRadius)),
+                            wallRadius, portal.halfExtents.y());
+                        mRttParent->addChild(mDebugShapesNode);
+                    }
                 }
             }
             else if (!inApproachZone && portal.approachActive)
