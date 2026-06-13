@@ -977,6 +977,11 @@ namespace MWRender
         mt->addChild(geode);
         mt->setNodeMask(Mask_PortalQuad);
 
+        // Default mask: full quad visible. Override per model in tryCreatePortal.
+        osg::ref_ptr<osg::StateSet> mss = mt->getOrCreateStateSet();
+        mss->addUniform(new osg::Uniform("portalMaskType", 0));
+        mss->addUniform(new osg::Uniform("portalAspect",   1.0f));
+
         return mt;
     }
 
@@ -1225,6 +1230,19 @@ namespace MWRender
             osg::Matrix m = quadNode->getMatrix();
             m.setTrans(m.getTrans() + osg::Vec3d(pushLocal));
             quadNode->setMatrix(m);
+        }
+
+        // Per-model portal shape mask.
+        {
+            std::string model = door.get<ESM::Door>()->mBase->mModel;
+            Misc::StringUtils::lowerCaseInPlace(model);
+            if (model.find("ex_imp_loaddoor_02") != std::string::npos
+             || model.find("ex_redoran_hut_01_a") != std::string::npos)
+            {
+                osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
+                mss->getUniform("portalMaskType")->set(1);
+                mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
+            }
         }
 
         // screenRes is always needed (portal shader reads it even before RTT is active).
