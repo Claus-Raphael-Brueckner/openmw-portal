@@ -13,6 +13,7 @@ void main()
 {
     if (portalMaskType == 1)
     {
+        // Arch: circle (top) + rectangle (bottom).
         // Circle radius = halfWidth; circle top aligned with portal top.
         // y_center in UV: 1 - 0.5/aspect  (aspect = halfHeight/halfWidth)
         float yc = 1.0 - 0.5 / portalAspect;
@@ -23,6 +24,14 @@ void main()
         // Rectangle: from v=0 up to the circle center, full width
         bool in_rect = v_texCoord.y <= yc;
         if (!in_circle && !in_rect) discard;
+    }
+    else if (portalMaskType == 2)
+    {
+        // Round: circle centered on the quad, radius = halfWidth.
+        float du = v_texCoord.x - 0.5;
+        float dv = v_texCoord.y - 0.5;
+        // World-space circle test: du² + (dv*aspect)² ≤ 0.25
+        if (du * du + dv * dv * portalAspect * portalAspect > 0.25) discard;
     }
 
     vec2 uv = v_clipPos.xy / v_clipPos.w * 0.5 + 0.5;

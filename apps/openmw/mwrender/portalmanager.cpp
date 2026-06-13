@@ -111,6 +111,10 @@ namespace MWRender
 			"ex_redoran_hut_01_a.nif",
 			"in_de_shack_door.nif",
 			"ex_de_shack_door.nif",
+			"ex_t_door_01.nif",
+			"ex_t_door_02.nif",
+			"in_t_housepod_door_exit.nif",
+			"in_t_s_plain_door.nif",
         };
         // 1×1 RGBA8 texture filled with a constant color.
         osg::ref_ptr<osg::Texture2D> makeSolidTexture(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
@@ -1009,6 +1013,15 @@ namespace MWRender
                 return false;
         }
 
+        // Doors with non-zero X or Y rotation are tilted / embedded at an angle and cannot
+        // be represented by a flat axis-aligned portal quad — skip them entirely.
+        {
+            const ESM::Position& p = door.getCellRef().getPosition();
+            constexpr float kRotTol = 0.017f; // ~1 degree
+            if (std::abs(p.rot[0]) > kRotTol || std::abs(p.rot[1]) > kRotTol)
+                return false;
+        }
+
         osg::Group* baseNode = door.getRefData().getBaseNode();
         if (!baseNode)
             return false;
@@ -1232,15 +1245,30 @@ namespace MWRender
             quadNode->setMatrix(m);
         }
 
-        // Per-model portal shape mask.
+        // Per-model overrides: shape mask and collision behaviour.
         {
             std::string model = door.get<ESM::Door>()->mBase->mModel;
             Misc::StringUtils::lowerCaseInPlace(model);
+
+            // Telvanni organic doors: no approach-zone ghost mode (no flat floor/wall geometry
+            // to stand on, and the opening shape doesn't match the rectangular physics box).
+            if (model.find("ex_t_") != std::string::npos || model.find("in_t_") != std::string::npos)
+                portal.noCollision = true;
+
             if (model.find("ex_imp_loaddoor_02") != std::string::npos
              || model.find("ex_redoran_hut_01_a") != std::string::npos)
             {
                 osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
                 mss->getUniform("portalMaskType")->set(1);
+                mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
+            }
+            else if (model.find("ex_t_door_01") != std::string::npos
+                  || model.find("ex_t_door_02") != std::string::npos
+                  || model.find("in_t_housepod_door_exit") != std::string::npos
+                  || model.find("in_t_s_plain_door") != std::string::npos)
+            {
+                osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
+                mss->getUniform("portalMaskType")->set(2);
                 mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
             }
         }
@@ -1628,7 +1656,8 @@ namespace MWRender
             // so cave-entrance rocks no longer block the path. A portal-guide floor box keeps
             // the player from falling through the interior floor while World collision is gone.
             constexpr float kApproachDist = 180.f;
-            const bool inApproachZone = portal.lastSide && dist >= 0.f && dist < kApproachDist
+            const bool inApproachZone = !portal.noCollision
+                && portal.lastSide && dist >= 0.f && dist < kApproachDist
                 && isWithinBounds(eyePos, portal);
 
             // Check whether any OTHER portal already owns the ghost-mode physics objects.

@@ -107,6 +107,7 @@ namespace MWRender
             float waterHeight = 0.f;
             bool destIsExterior = false;
             bool approachActive = false; ///< ghost mode currently active for this portal
+            bool noCollision    = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
         };
 
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter, osg::Quat& inOutNifRot) const;
