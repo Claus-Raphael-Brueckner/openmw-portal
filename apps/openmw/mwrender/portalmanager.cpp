@@ -1779,12 +1779,13 @@ namespace MWRender
                     world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
                         portal.halfExtents.x(), portal.halfExtents.y());
 
-                    // Debug: show collision shapes as magenta wireframe.
+                    // Debug: show collision shapes as magenta wireframe (settings.cfg: [Portal] debug geometry).
+                    if (Settings::portal().mDebugGeometry)
                     {
                         constexpr float wallRadius = 45.f;
                         const osg::Quat portalRot = portal.invRot.inverse();
                         auto toWorld = [&](float localX) -> osg::Vec3f {
-                            return portal.planePoint + portalRot * osg::Vec3f(localX, -wallRadius, 0.f);
+                            return portal.planePoint + portalRot * osg::Vec3f(localX, 0.f, 0.f);
                         };
                         mDebugShapesNode = buildPortalCollisionDebug(
                             hasRamp, rampCenter, rampRot, halfRampWidth, halfRampLen,

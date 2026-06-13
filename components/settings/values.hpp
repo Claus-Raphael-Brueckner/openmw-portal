@@ -15,6 +15,7 @@
 #include "categories/models.hpp"
 #include "categories/navigator.hpp"
 #include "categories/physics.hpp"
+#include "categories/portal.hpp"
 #include "categories/postprocessing.hpp"
 #include "categories/saves.hpp"
 #include "categories/shaders.hpp"
@@ -63,6 +64,7 @@ namespace Settings
         StereoCategory mStereo{ mIndex };
         StereoViewCategory mStereoView{ mIndex };
         PostProcessingCategory mPostProcessing{ mIndex };
+        PortalCategory mPortal{ mIndex };
     };
 
     class StaticValues
@@ -217,6 +219,11 @@ namespace Settings
     inline PostProcessingCategory& postProcessing()
     {
         return values().mPostProcessing;
+    }
+
+    inline PortalCategory& portal()
+    {
+        return values().mPortal;
     }
 
     template <class T>

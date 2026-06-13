@@ -665,9 +665,9 @@ namespace MWPhysics
             static_cast<btScalar>(portalRot.w()));
         const btVector3 origin(planePoint.x(), planePoint.y(), planePoint.z());
 
-        // Offset the cylinder toward the player so its back face is flush with the portal plane.
-        // In local portal space Y < 0 is the approach side, so shift by -radius along local Y.
-        const btScalar yOffset = -radius;
+        // Center the cylinders on the portal plane (Y=0 in local portal space),
+        // aligned with the lower portal vertices.
+        const btScalar yOffset = 0.f;
 
         // Transform a local-space offset through the portal rotation into world space.
         auto toWorld = [&](float localX) -> btVector3
