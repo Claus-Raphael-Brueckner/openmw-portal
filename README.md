@@ -1,3 +1,11 @@
+OpenMW — Portal Rendering Fork
+===============================
+
+> **This is an experimental hobby fork** that adds real-time portal rendering to OpenMW.
+> See [README-portal.md](README-portal.md) for details.
+
+---
+
 OpenMW
 ======
 
