@@ -26,6 +26,7 @@
 #include <osg/LightSource>
 #include <osg/Material>
 #include <osg/MatrixTransform>
+#include <osg/PolygonOffset>
 #include <osg/PositionAttitudeTransform>
 #include <osg/StateSet>
 #include <osg/Texture2D>
@@ -94,7 +95,22 @@ namespace MWRender
             "in_velothismall_ndoor_01.nif",
             "ex_common_door_01.nif",
             "ex_common_door_balcony.nif",
-            "in_c_door_wood_square.nif"
+            "in_c_door_wood_square.nif",
+			"ex_ashl_door_01.nif",
+			"ex_ashl_door_02.nif",
+			"in_ashl_door_01.nif",
+			"in_ashl_door_02.nif",
+			"ex_imp_loaddoor_03.nif",
+			"in_impsmall_loaddoor_01.nif",
+			"ex_imp_loaddoor_02.nif",
+			"in_ar_door_01.nif",
+			"ex_redoran_barracks_door.nif",
+			"in_redoran_barracks_door.nif",
+			"in_r_s_door_01.nif",
+			"in_redoran_hut_door_01.nif",
+			"ex_redoran_hut_01_a.nif",
+			"in_de_shack_door.nif",
+			"ex_de_shack_door.nif",
         };
         // 1×1 RGBA8 texture filled with a constant color.
         osg::ref_ptr<osg::Texture2D> makeSolidTexture(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
@@ -943,6 +959,14 @@ namespace MWRender
         ss->setMode(GL_LIGHTING, osg::StateAttribute::OFF | osg::StateAttribute::PROTECTED);
         // Reverse-Z aware depth write.
         ss->setAttributeAndModes(new SceneUtil::AutoDepth(osg::Depth::LEQUAL, 0.0, 1.0, true));
+        // Bias the portal quad slightly toward the camera so it wins depth tests against
+        // coplanar wall geometry (e.g. in_c_wall_plain) placed at the portal opening.
+        // Sign convention mirrors nifloader.cpp handleDecal: positive in reverse-Z, negative in standard.
+        {
+            const float sign = SceneUtil::AutoDepth::isReversed() ? 1.f : -1.f;
+            osg::ref_ptr<osg::PolygonOffset> po = new osg::PolygonOffset(sign * 0.65f, sign * 1.f);
+            ss->setAttributeAndModes(po, osg::StateAttribute::ON);
+        }
         ss->setRenderBinToInherit();
 
         osg::ref_ptr<osg::Geode> geode = new osg::Geode;
@@ -1047,8 +1071,8 @@ namespace MWRender
         Portal portal;
         portal.door        = door;
         portal.quadNode    = quadNode;
-        portal.planePoint  = pos;
         portal.quadCenter  = pos + cellRefRot * localOffset;
+        portal.planePoint  = portal.quadCenter;
         portal.planeNormal = normal;
         portal.invRot      = fullRot.inverse();
         portal.halfExtents = halfExtents;
@@ -1187,6 +1211,22 @@ namespace MWRender
             }
         }
 
+        // Interior→Exterior: source cell may contain flat wall geometry (e.g. in_c_wall_plain)
+        // placed a few units in front of the portal door. PolygonOffset handles the coplanar
+        // case but cannot overcome a geometric depth difference; shift the quad toward the
+        // interior player so it wins the depth test against such walls.
+        // Exterior→Interior is handled by the RTT clip-plane bias in setupPortalRTT.
+        if (portal.destIsExterior)
+        {
+            constexpr float kWallClearance = 10.f;
+            // In NIF-root-local space the portal normal is always -Y, so displacing by
+            // nifRootQuat*(0,-k,0) == k units toward the player after cellRefRot is applied.
+            const osg::Vec3f pushLocal = nifRootQuat * osg::Vec3f(0.f, -kWallClearance, 0.f);
+            osg::Matrix m = quadNode->getMatrix();
+            m.setTrans(m.getTrans() + osg::Vec3d(pushLocal));
+            quadNode->setMatrix(m);
+        }
+
         // screenRes is always needed (portal shader reads it even before RTT is active).
         {
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
@@ -1292,7 +1332,12 @@ namespace MWRender
                 portal.rttNode->setClearColor(mExteriorSkyColor);
             {
                 const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-                portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos);
+                // Push the clip plane slightly into the destination cell so that flat wall
+                // geometry (e.g. in_c_wall_plain) placed flush at the destination door is
+                // clipped and does not block the view into the room. 10 units matches the
+                // forward bias applied to the source portal quad in buildQuadNode.
+                constexpr float kClipForwardBias = 10.f;
+                portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos + destFwd * kClipForwardBias);
             }
             portal.rttNode->setClipEnabled(true);
             portal.rttNode->setNodeMask(Mask_RenderToTexture);
