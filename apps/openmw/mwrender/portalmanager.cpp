@@ -1701,10 +1701,6 @@ namespace MWRender
                 {
                     MWBase::World* world = MWBase::Environment::get().getWorld();
                     world->setPlayerGhostMode(true);
-                    // Floor box: 300×300, 10 units thick, placed 5 units below the door base.
-                    const float floorZ = portal.planePoint.z() - portal.halfExtents.y() - 5.f;
-                    const osg::Vec3f floorCenter(portal.planePoint.x(), portal.planePoint.y(), floorZ);
-                    world->addPortalFloor(floorCenter, 300.f, 300.f);
                     // Two angled guide walls funnelling the player toward the portal opening.
                     world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
                         portal.halfExtents.x(), portal.halfExtents.y());
