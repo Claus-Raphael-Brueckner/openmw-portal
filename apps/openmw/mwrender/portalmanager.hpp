@@ -7,6 +7,7 @@
 #include <osg/Vec2f>
 #include <osg/Vec3f>
 #include <osg/Vec4f>
+#include <osg/Node>
 #include <osg/ref_ptr>
 
 #include "../mwworld/ptr.hpp"
@@ -109,7 +110,8 @@ namespace MWRender
             bool approachActive  = false; ///< ghost mode currently active for this portal
             bool noCollision     = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
             bool needsFlatFloor  = false; ///< always add flat floor box at portal sill (e.g. ex_cave_door_01)
-            bool needsClipBias   = false; ///< push RTT clip plane 10 units into dest cell to clear flush wall geometry
+            float clipBias       = 0.f;   ///< units to push RTT clip plane into dest cell to clear flush wall geometry
+            osg::ref_ptr<osg::Node> decorMesh; ///< optional decorative mesh rendered alongside the portal quad
         };
 
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter, osg::Quat& inOutNifRot) const;

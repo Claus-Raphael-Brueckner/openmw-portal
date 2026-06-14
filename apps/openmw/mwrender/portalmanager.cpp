@@ -1301,12 +1301,14 @@ namespace MWRender
              || model.find("in_cave_door") != std::string::npos)
                 portal.needsFlatFloor = true;
 
-            // Common doors (ex_common_door_01 / in_c_door_wood_square) have flat wall geometry
-            // (in_c_wall_plain) placed flush at the destination door that would block the RTT view.
-            // Push the clip plane 10 units into the destination cell to clear it.
+            // Per-door RTT clip plane bias: pushes the clip plane into the destination cell
+            // to clear flush wall/frame geometry that would otherwise block the portal view.
             if (model.find("ex_common_door_01") != std::string::npos)
-            // || model.find("in_c_door_wood_square") != std::string::npos)
-                portal.needsClipBias = true;
+                portal.clipBias = 10.f;
+            else if (model.find("in_hlaalu_loaddoor_01") != std::string::npos
+                  || model.find("in_hlaalu_door") != std::string::npos
+                  || model.find("hlaalu_loaddoor") != std::string::npos)
+                portal.clipBias = -10.0f;
 
             if (model.find("ex_imp_loaddoor_02") != std::string::npos
              || model.find("in_impsmall_loaddoor_01") != std::string::npos
@@ -1324,6 +1326,37 @@ namespace MWRender
                 osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
                 mss->getUniform("portalMaskType")->set(2);
                 mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
+            }
+        }
+
+        // Decorative meshes placed alongside specific portal quads.
+        {
+            std::string model = door.get<ESM::Door>()->mBase->mModel;
+            Misc::StringUtils::lowerCaseInPlace(model);
+            if (model.find("in_hlaalu_loaddoor_01") != std::string::npos)
+            {
+                const VFS::Path::Normalized decorPath = Misc::ResourceHelpers::correctMeshPath(
+                    VFS::Path::Normalized("i/portal_in_hlaalu_loaddoor_01.nif"));
+                if (mResourceSystem->getVFS()->exists(decorPath))
+                {
+                    try
+                    {
+                        osg::ref_ptr<osg::Node> decorNode
+                            = mResourceSystem->getSceneManager()->getInstance(decorPath);
+                        // Shift 10 units along the portal normal (in baseNode-local space:
+                        // nifRootQuat*(0,-1,0)*10, since planeNormal = cellRefRot*nifRootQuat*(0,-1,0))
+                        const osg::Vec3f decorShift = nifRootQuat * osg::Vec3f(0.f, -1.f, 0.f) * 6.5f;
+                        osg::ref_ptr<osg::MatrixTransform> decorXform = new osg::MatrixTransform(
+                            osg::Matrix::translate(osg::Vec3d(decorShift)));
+                        decorXform->addChild(decorNode);
+                        baseNode->addChild(decorXform);
+                        portal.decorMesh = decorXform;
+                    }
+                    catch (const std::exception& e)
+                    {
+                        Log(Debug::Warning) << "Portal: failed to load decor mesh " << decorPath << ": " << e.what();
+                    }
+                }
             }
         }
 
@@ -1363,6 +1396,12 @@ namespace MWRender
                 osg::Node::ParentList parents = it->quadNode->getParents();
                 for (auto* parent : parents)
                     parent->removeChild(it->quadNode);
+            }
+            if (it->decorMesh)
+            {
+                osg::Node::ParentList parents = it->decorMesh->getParents();
+                for (auto* parent : parents)
+                    parent->removeChild(it->decorMesh);
             }
             mPortals.erase(it);
             return true;
@@ -1436,9 +1475,7 @@ namespace MWRender
                 // (e.g. in_c_wall_plain) flush at the destination door (ex_common_door_01 /
                 // in_c_door_wood_square). Other door types get the clip plane right at the door
                 // to avoid a visible gap at the portal edge.
-                constexpr float kClipForwardBias = 10.f;
-                const float bias = portal.needsClipBias ? kClipForwardBias : 0.f;
-                portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos + destFwd * bias);
+                portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos + destFwd * portal.clipBias);
             }
             portal.rttNode->setClipEnabled(true);
             portal.rttNode->setNodeMask(Mask_RenderToTexture);
