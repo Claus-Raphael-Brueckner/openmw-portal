@@ -1737,15 +1737,22 @@ namespace MWRender
 
                     if (portal.needsFlatFloor || !portal.destIsExterior)
                     {
-                        // Flat floor for all exterior-source portals: terrain coverage can be
-                        // sparse and ghost mode would otherwise drop the player through gaps.
-                        hasRamp = true;
-                        halfRampWidth = 300.f;
-                        halfRampLen   = 300.f;
-                        rampCenter    = osg::Vec3f(portal.planePoint.x(), portal.planePoint.y(),
-                                                   portalSillZ - 5.f);
-                        // rampRot stays identity (flat box)
-                        world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
+                        // Add a flat floor only when the player is significantly above terrain
+                        // (gap in terrain coverage, cliff edge, etc.). If terrain is right
+                        // underfoot, the existing ground handles the player's weight in ghost mode.
+                        const ESM::RefId worldspace
+                            = world->getPlayerPtr().getCell()->getCell()->getWorldSpace();
+                        const float terrainZ = world->getTerrainHeightAt(playerPos, worldspace);
+                        constexpr float kTerrainGapThreshold = 20.f;
+                        if (playerPos.z() - terrainZ > kTerrainGapThreshold)
+                        {
+                            hasRamp = true;
+                            halfRampWidth = 300.f;
+                            halfRampLen   = 300.f;
+                            rampCenter    = osg::Vec3f(portal.planePoint.x(), portal.planePoint.y(),
+                                                       portalSillZ - 5.f);
+                            world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
+                        }
                     }
                     // If the portal sill is more than ~1 m above the player's feet, add a ramp.
                     // The ramp top surface passes through playerPos, portal-bottom-left, and
