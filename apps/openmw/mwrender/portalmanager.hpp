@@ -109,6 +109,7 @@ namespace MWRender
             bool approachActive  = false; ///< ghost mode currently active for this portal
             bool noCollision     = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
             bool needsFlatFloor  = false; ///< always add flat floor box at portal sill (e.g. ex_cave_door_01)
+            bool needsClipBias   = false; ///< push RTT clip plane 10 units into dest cell to clear flush wall geometry
         };
 
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter, osg::Quat& inOutNifRot) const;

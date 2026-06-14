@@ -1301,7 +1301,15 @@ namespace MWRender
              || model.find("in_cave_door") != std::string::npos)
                 portal.needsFlatFloor = true;
 
+            // Common doors (ex_common_door_01 / in_c_door_wood_square) have flat wall geometry
+            // (in_c_wall_plain) placed flush at the destination door that would block the RTT view.
+            // Push the clip plane 10 units into the destination cell to clear it.
+            if (model.find("ex_common_door_01") != std::string::npos)
+            // || model.find("in_c_door_wood_square") != std::string::npos)
+                portal.needsClipBias = true;
+
             if (model.find("ex_imp_loaddoor_02") != std::string::npos
+             || model.find("in_impsmall_loaddoor_01") != std::string::npos
              || model.find("ex_redoran_hut_01_a") != std::string::npos)
             {
                 osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
@@ -1424,12 +1432,13 @@ namespace MWRender
                 portal.rttNode->setClearColor(mExteriorSkyColor);
             {
                 const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-                // Push the clip plane slightly into the destination cell so that flat wall
-                // geometry (e.g. in_c_wall_plain) placed flush at the destination door is
-                // clipped and does not block the view into the room. 10 units matches the
-                // forward bias applied to the source portal quad in buildQuadNode.
+                // Only push the clip plane forward for door types that place flat wall geometry
+                // (e.g. in_c_wall_plain) flush at the destination door (ex_common_door_01 /
+                // in_c_door_wood_square). Other door types get the clip plane right at the door
+                // to avoid a visible gap at the portal edge.
                 constexpr float kClipForwardBias = 10.f;
-                portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos + destFwd * kClipForwardBias);
+                const float bias = portal.needsClipBias ? kClipForwardBias : 0.f;
+                portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos + destFwd * bias);
             }
             portal.rttNode->setClipEnabled(true);
             portal.rttNode->setNodeMask(Mask_RenderToTexture);
@@ -1726,9 +1735,10 @@ namespace MWRender
 
                     const float portalSillZ = portal.planePoint.z() - portal.halfExtents.y();
 
-                    if (portal.needsFlatFloor)
+                    if (portal.needsFlatFloor || !portal.destIsExterior)
                     {
-                        // Original flat floor: 300×300 box placed 5 units below the portal sill.
+                        // Flat floor for all exterior-source portals: terrain coverage can be
+                        // sparse and ghost mode would otherwise drop the player through gaps.
                         hasRamp = true;
                         halfRampWidth = 300.f;
                         halfRampLen   = 300.f;
