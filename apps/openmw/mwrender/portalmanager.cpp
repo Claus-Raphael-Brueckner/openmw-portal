@@ -76,6 +76,8 @@
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/ptr.hpp"
+#include "../mwphysics/raycasting.hpp"
+#include "../mwphysics/collisiontype.hpp"
 
 #include "portalrttnode.hpp"
 #include "ripples.hpp"
@@ -1109,6 +1111,27 @@ namespace MWRender
             Misc::StringUtils::lowerCaseInPlace(model);
             if (model.find("ex_nord_door_01") != std::string::npos)
                 localOffset = osg::Vec3f(10.f, 13.f, -15.f);  // manually tuned hinge offset
+            else if (model.find("ex_common_door_01") != std::string::npos)
+            {
+                // ex_common_door_01 inside ex_common_entrance_02 (L-shaped outer frame):
+                // the portal quad floats in the entrance opening. Push it inward (+Y in NIF
+                // space, which is away from the approaching player) so it sits in the frame.
+                const osg::Vec3f doorPos = door.getCellRef().getPosition().asVec3();
+                constexpr float kEntranceRangeSq = 150.f * 150.f;
+                constexpr float kEntranceInset   = 5.f; // tune: units to push quad inward
+                for (const auto& ref : door.getCell()->getReadOnlyStatics().mList)
+                {
+                    if (!ref.mBase || ref.mBase->mModel.empty()) continue;
+                    std::string m = ref.mBase->mModel;
+                    Misc::StringUtils::lowerCaseInPlace(m);
+                    if (m.find("ex_common_entrance_02") == std::string::npos) continue;
+                    if ((ref.mRef.getPosition().asVec3() - doorPos).length2() < kEntranceRangeSq)
+                    {
+                        localOffset.y() += kEntranceInset;
+                        break;
+                    }
+                }
+            }
         }
         osg::ref_ptr<osg::MatrixTransform> quadNode = buildQuadNode(halfExtents, nifRootQuat, localOffset);
         // Clear any previously loaded door mesh children (happens when a locked door is unlocked
@@ -1303,34 +1326,9 @@ namespace MWRender
 
             // Per-door RTT clip plane bias: pushes the clip plane into the destination cell
             // to clear flush wall/frame geometry that would otherwise block the portal view.
-            if (model.find("ex_common_door_01") != std::string::npos)
-            {
-                // Only penalise the rare placements where a static sits directly inside the door.
-                // Probe the destination CellStore: if any ESM::Static origin is within
-                // kClipBiasProbeRange units of the interior door and roughly inward, set the bias.
-                constexpr float kClipBiasProbeRange = 14.f;
-                try
-                {
-                    MWWorld::CellStore* destStore =
-                        MWBase::Environment::get().getWorld()->findCellStore(portal.destCellId);
-                    if (destStore && !portal.destIsExterior)
-                    {
-                        const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-                        const float rangeSq = kClipBiasProbeRange * kClipBiasProbeRange;
-                        for (const auto& ref : destStore->getReadOnlyStatics().mList)
-                        {
-                            const osg::Vec3f delta = ref.mRef.getPosition().asVec3() - portal.destDoorPos;
-                            if (delta.length2() < rangeSq && destFwd * delta > -5.f)
-                            {
-                                portal.clipBias = 10.f;
-                                break;
-                            }
-                        }
-                    }
-                }
-                catch (...) {}
-            }
-            else if (model.find("in_hlaalu_loaddoor_01") != std::string::npos
+            // in_c_wall_plain segments at the door opening are handled by omitting them from
+            // the RTT scene in loadCellStatics, so ex_common_door_01 needs no clipBias here.
+            if (model.find("in_hlaalu_loaddoor_01") != std::string::npos
                   || model.find("in_hlaalu_door") != std::string::npos
                   || model.find("hlaalu_loaddoor") != std::string::npos)
                 portal.clipBias = -10.0f;
@@ -1679,6 +1677,38 @@ namespace MWRender
                     setupPortalRTT(portal);
                 else if (!shouldBeActive && portal.rttNode)
                     teardownPortalRTT(portal);
+            }
+
+            // One-shot raytrace: detect in_c_wall_plain directly in front of interior portals
+            // and set clipBias so the clip plane clears it. Runs in update() (not tryCreatePortal)
+            // because destination-cell physics is guaranteed loaded by the time the RTT activates.
+            if (portal.rttNode && !portal.destIsExterior && !portal.clipBiasResolved)
+            {
+                portal.clipBiasResolved = true;
+                const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
+                const auto* rayCasting = MWBase::Environment::get().getWorld()->getRayCasting();
+                if (rayCasting)
+                {
+                    auto result = rayCasting->castRay(
+                        portal.destDoorPos,
+                        portal.destDoorPos + destFwd * 12.f,
+                        {}, {}, MWPhysics::CollisionType_World);
+                    if (result.mHit && !result.mHitObject.isEmpty())
+                    {
+                        try
+                        {
+                            std::string model(result.mHitObject.getClass().getCorrectedModel(result.mHitObject));
+                            Misc::StringUtils::lowerCaseInPlace(model);
+                            if (model.find("in_c_wall_plain") != std::string::npos)
+                            {
+                                portal.clipBias = 10.f;
+                                portal.rttNode->setClipPlaneBoundary(
+                                    destFwd, portal.destDoorPos + destFwd * portal.clipBias);
+                            }
+                        }
+                        catch (...) {}
+                    }
+                }
             }
 
             // Stage 3: update RTT camera to track the player's position and look direction.
