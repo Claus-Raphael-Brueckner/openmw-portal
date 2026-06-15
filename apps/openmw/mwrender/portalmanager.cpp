@@ -1304,7 +1304,32 @@ namespace MWRender
             // Per-door RTT clip plane bias: pushes the clip plane into the destination cell
             // to clear flush wall/frame geometry that would otherwise block the portal view.
             if (model.find("ex_common_door_01") != std::string::npos)
-                portal.clipBias = 10.f;
+            {
+                // Only penalise the rare placements where a static sits directly inside the door.
+                // Probe the destination CellStore: if any ESM::Static origin is within
+                // kClipBiasProbeRange units of the interior door and roughly inward, set the bias.
+                constexpr float kClipBiasProbeRange = 14.f;
+                try
+                {
+                    MWWorld::CellStore* destStore =
+                        MWBase::Environment::get().getWorld()->findCellStore(portal.destCellId);
+                    if (destStore && !portal.destIsExterior)
+                    {
+                        const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
+                        const float rangeSq = kClipBiasProbeRange * kClipBiasProbeRange;
+                        for (const auto& ref : destStore->getReadOnlyStatics().mList)
+                        {
+                            const osg::Vec3f delta = ref.mRef.getPosition().asVec3() - portal.destDoorPos;
+                            if (delta.length2() < rangeSq && destFwd * delta > -5.f)
+                            {
+                                portal.clipBias = 10.f;
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (...) {}
+            }
             else if (model.find("in_hlaalu_loaddoor_01") != std::string::npos
                   || model.find("in_hlaalu_door") != std::string::npos
                   || model.find("hlaalu_loaddoor") != std::string::npos)
