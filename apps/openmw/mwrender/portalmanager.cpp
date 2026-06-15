@@ -1333,21 +1333,32 @@ namespace MWRender
         {
             std::string model = door.get<ESM::Door>()->mBase->mModel;
             Misc::StringUtils::lowerCaseInPlace(model);
+            const char* decorNif = nullptr;
+            bool decorUsesLocalOffset = false;
             if (model.find("in_hlaalu_loaddoor_01") != std::string::npos)
             {
+                decorNif = "i/portal_in_hlaalu_loaddoor_01.nif";
+                decorUsesLocalOffset = true;  // symmetric arch, localOffset ≈ 0 but correct to include
+            }
+            else if (model.find("in_hlaalu_door") != std::string::npos)
+            {
+                decorNif = "i/portal_in_hlaalu_door.nif";
+                decorUsesLocalOffset = false; // NIF origin matches door hinge, geometry already offset
+            }
+            if (decorNif)
+            {
                 const VFS::Path::Normalized decorPath = Misc::ResourceHelpers::correctMeshPath(
-                    VFS::Path::Normalized("i/portal_in_hlaalu_loaddoor_01.nif"));
+                    VFS::Path::Normalized(decorNif));
                 if (mResourceSystem->getVFS()->exists(decorPath))
                 {
                     try
                     {
                         osg::ref_ptr<osg::Node> decorNode
                             = mResourceSystem->getSceneManager()->getInstance(decorPath);
-                        // Shift 10 units along the portal normal (in baseNode-local space:
-                        // nifRootQuat*(0,-1,0)*10, since planeNormal = cellRefRot*nifRootQuat*(0,-1,0))
                         const osg::Vec3f decorShift = nifRootQuat * osg::Vec3f(0.f, -1.f, 0.f) * 6.5f;
+                        const osg::Vec3f decorPos = (decorUsesLocalOffset ? localOffset : osg::Vec3f()) + decorShift;
                         osg::ref_ptr<osg::MatrixTransform> decorXform = new osg::MatrixTransform(
-                            osg::Matrix::translate(osg::Vec3d(decorShift)));
+                            osg::Matrix::translate(osg::Vec3d(decorPos)));
                         decorXform->addChild(decorNode);
                         baseNode->addChild(decorXform);
                         portal.decorMesh = decorXform;
