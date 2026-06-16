@@ -1086,9 +1086,9 @@ namespace MWRender
         osg::Vec2f halfExtents = computeHalfExtents(door, modelCenter, nifRootQuat);
 
         {
-            double angle0; osg::Vec3d axis0;
+            osg::Quat::value_type angle0; osg::Vec3d axis0;
             nifRootQuatBeforeHeuristic.getRotate(angle0, axis0);
-            double angle; osg::Vec3d axis;
+            osg::Quat::value_type angle; osg::Vec3d axis;
             nifRootQuat.getRotate(angle, axis);
             const auto& pos = door.getCellRef().getPosition();
             Log(Debug::Info) << "Portal door model=" << modelPath
@@ -1112,10 +1112,29 @@ namespace MWRender
                 localOffset = osg::Vec3f(10.f, 13.f, -15.f);  // manually tuned hinge offset
             else if (model.find("ex_common_door_01") != std::string::npos)
             {
-                // ex_common_door_01 portals whose destination is a listed interior cell sit
-                // inside an L-shaped ex_common_entrance_02 frame. The outer portal quad needs
-                // to align with the frame opening rather than the door face set back inside.
-                // The affected destination cells are listed in settings ("portal forward cells").
+                // Exterior cells: snap portal depth to nearby ex_common_entrance_02 frame origin.
+                // Door placement depth varies between level designers; the frame is the stable
+                // reference. Project frame→door vector onto the door's depth axis (Y in cellRef space).
+                if (door.getCell() && door.getCell()->isExterior())
+                {
+                    const ESM::Position& cpos = door.getCellRef().getPosition();
+                    const osg::Vec3f doorWorldPos(cpos.pos[0], cpos.pos[1], cpos.pos[2]);
+                    door.getCell()->forEachType<ESM::Static>([&](MWWorld::Ptr ref) -> bool {
+                        std::string sm = ref.get<ESM::Static>()->mBase->mModel;
+                        Misc::StringUtils::lowerCaseInPlace(sm);
+                        if (sm.find("ex_common_entrance_02") == std::string::npos)
+                            return true;
+                        const ESM::Position& fp = ref.getCellRef().getPosition();
+                        const osg::Vec3f frameWorldPos(fp.pos[0], fp.pos[1], fp.pos[2]);
+                        if ((frameWorldPos - doorWorldPos).length2() > 200.f * 200.f)
+                            return true;
+                        localOffset.y() = (cellRefRot.inverse() * (frameWorldPos - doorWorldPos)).y() + 10.f;
+                        return false;
+                    });
+                }
+
+                // Forward cells: per-destination-cell quad shift for specific interior cells
+                // where the portal still needs additional adjustment (e.g. sits behind a wall).
                 const ESM::RefId destCell = door.getCellRef().getDestCell();
                 std::string_view listView = Settings::portal().mForwardCells.get();
                 while (!listView.empty())
@@ -1259,7 +1278,7 @@ namespace MWRender
                             }
                         }
                         {
-                            double ang; osg::Vec3d ax;
+                            osg::Quat::value_type ang; osg::Vec3d ax;
                             portal.destDoorRot.getRotate(ang, ax);
                             const osg::Vec3f fwd = portal.destDoorRot * osg::Vec3f(0.f,-1.f,0.f);
                             Log(Debug::Info) << "Portal dest door model=" << ref.mBase->mModel
