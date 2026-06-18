@@ -94,6 +94,7 @@ namespace MWRender
             "hlaalu_loaddoor_ 02.nif",
             "in_hlaalu_loaddoor_01.nif",
             "in_hlaalu_door.nif",
+            "hlaalu_loaddoor_ 01.nif",
             "ex_velothi_loaddoor_01.nif",
             "in_velothismall_ndoor_01.nif",
             "ex_common_door_01.nif",
@@ -1048,17 +1049,11 @@ namespace MWRender
         if (door.getCellRef().isLocked())
             return false;
 
-        // Only create portals for genuine exterior↔interior transitions.
-        // ex_cave_door_01 / in_cave_door_01 can also appear as interior→interior connectors
-        // (deeper cave rooms). Those must not become portals — their destCell is the same
-        // cell type as the source cell.
         {
             const ESM::RefId& destId = door.getCellRef().getDestCell();
             const MWWorld::CellStore* destStore
                 = MWBase::Environment::get().getWorld()->findCellStore(destId);
             if (!destStore)
-                return false;
-            if (door.getCell()->getCell()->isExterior() == destStore->getCell()->isExterior())
                 return false;
         }
 
@@ -1797,14 +1792,11 @@ namespace MWRender
             const bool side = (dist >= 0.f);
 
             // --- Approach ghost mode ---
-            // Strips CollisionType_World so cave-entrance rocks don't block the path.
-            // Only needed when the player is OUTSIDE approaching an interior portal
-            // (destIsExterior=false). For interior→exterior portals the approach side
-            // is inside a building where door frames have no blocking collision geometry,
-            // so ghost mode is unnecessary and causes the indoor floor to disappear.
+            // Strips CollisionType_World so rocks/walls don't block the path through the portal.
+            // Needed for exterior→interior portals (cave entrance rocks) and for interior→exterior
+            // portals where the indoor cell has no physical opening behind the door frame.
             constexpr float kApproachDist = 180.f;
             const bool inApproachZone = !portal.noCollision
-                && !portal.destIsExterior
                 && portal.lastSide && dist >= 0.f && dist < kApproachDist
                 && isWithinBounds(eyePos, portal);
 
@@ -1832,7 +1824,19 @@ namespace MWRender
 
                     const float portalSillZ = portal.planePoint.z() - portal.halfExtents.y();
 
-                    if (portal.needsFlatFloor || !portal.destIsExterior)
+                    if (portal.destIsExterior)
+                    {
+                        // Player is inside an interior cell approaching an exterior portal.
+                        // Interior floor is CollisionType_World, stripped by ghost mode → always
+                        // add a flat platform so the player doesn't fall through the floor.
+                        hasRamp = true;
+                        halfRampWidth = 300.f;
+                        halfRampLen   = 300.f;
+                        rampCenter    = osg::Vec3f(portal.planePoint.x(), portal.planePoint.y(),
+                                                   portalSillZ - 5.f);
+                        world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
+                    }
+                    else if (portal.needsFlatFloor)
                     {
                         // Add a flat floor only when the player is significantly above terrain
                         // (gap in terrain coverage, cliff edge, etc.). If terrain is right
