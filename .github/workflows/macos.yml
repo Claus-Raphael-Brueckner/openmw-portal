@@ -10,6 +10,9 @@ on:
         description: MacOS Runner image
         required: true
         type: string
+      release:
+        default: false
+        type: boolean
 
 jobs:
   MacOS:
@@ -49,7 +52,7 @@ jobs:
           ${{ github.workspace }}/build/OpenMW-*.dmg
 
     - name: Create prerelease
-      if: ${{ inputs.build-type == 'Release' }}
+      if: ${{ inputs.release }}
       uses: softprops/action-gh-release@v2
       with:
         files: ${{ github.workspace }}/build/OpenMW-*.dmg

@@ -6,6 +6,13 @@ on:
         - openmw-**
 
 jobs:
+  Linux:
+    uses: ./.github/workflows/linux.yml
+    with:
+      build-type: Release
+      release: true
+    secrets: inherit
+
   Windows:
     uses: ./.github/workflows/windows.yml
     with:
@@ -25,3 +32,4 @@ jobs:
     with:
       image: ${{ matrix.args.image }}
       build-type: Release
+      release: true

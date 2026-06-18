@@ -1,0 +1,81 @@
+name: Reusable Linux workflow
+
+on:
+  workflow_call:
+    inputs:
+      build-type:
+        default: RelWithDebInfo
+        type: string
+      release:
+        default: false
+        type: boolean
+
+jobs:
+  Linux:
+    name: linux-ubuntu
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Add OpenMW PPA Dependencies
+      run: sudo add-apt-repository ppa:openmw/openmw; sudo apt-get update
+
+    - name: Install Building Dependencies
+      run: sudo CI/install_debian_deps.sh gcc openmw-deps openmw-deps-dynamic
+
+    - name: Prime ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: linux-${{ inputs.build-type }}
+        max-size: 1000M
+
+    - name: Configure
+      run: >
+        cmake .
+        -D CMAKE_BUILD_TYPE=${{ inputs.build-type }}
+        -D OPENMW_USE_SYSTEM_RECASTNAVIGATION=ON
+        -D USE_SYSTEM_TINYXML=ON
+        -D BUILD_COMPONENTS_TESTS=${{ ! inputs.release }}
+        -D BUILD_OPENMW_TESTS=${{ ! inputs.release }}
+        -D BUILD_OPENCS_TESTS=${{ ! inputs.release }}
+        -D CMAKE_INSTALL_PREFIX=install
+
+    - name: Build
+      run: cmake --build . -- -j$(nproc)
+
+    - name: Run components tests
+      if: ${{ ! inputs.release }}
+      run: ./components-tests
+
+    - name: Run OpenMW tests
+      if: ${{ ! inputs.release }}
+      run: ./openmw-tests
+
+    - name: Run OpenMW-CS tests
+      if: ${{ ! inputs.release }}
+      run: ./openmw-cs-tests
+
+    - name: Install
+      if: ${{ inputs.release }}
+      run: cmake --install .
+
+    - name: Package
+      if: ${{ inputs.release }}
+      run: tar -czf openmw-linux-${{ github.ref_name }}.tar.gz -C install .
+
+    - name: Store build artifact
+      if: ${{ inputs.release }}
+      uses: actions/upload-artifact@v6
+      with:
+        name: openmw-linux-${{ github.sha }}
+        path: openmw-linux-${{ github.ref_name }}.tar.gz
+
+    - name: Create prerelease
+      if: ${{ inputs.release }}
+      uses: softprops/action-gh-release@v2
+      with:
+        files: openmw-linux-${{ github.ref_name }}.tar.gz
+        prerelease: true
+        draft: true
