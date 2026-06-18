@@ -38,7 +38,7 @@ void PortalRTTNode::setDefaults(osg::Camera* camera)
 
     camera->setNodeMask(Mask_RenderToTexture);
 
-    // Clip plane (GL_CLIP_PLANE0): kept on a ClipNode so it only affects the portal scene.
+    // Clip plane (GL_CLIP_PLANE0): kept on a ClipNode so it only affects the portal scene geometry.
     // Equation is updated each frame in apply() in eye space.
     mClipPlane = new osg::ClipPlane(0, 0.0, 0.0, 1.0, 0.0); // default: always pass
     osg::ref_ptr<osg::ClipNode> clipNode = new osg::ClipNode;
@@ -62,13 +62,33 @@ void PortalRTTNode::setDefaults(osg::Camera* camera)
         clipSS->setMode(GL_BLEND, osg::StateAttribute::OFF);
     }
     clipNode->addClipPlane(mClipPlane.get());
-    clipNode->addChild(mPortalScene);
-    camera->addChild(clipNode);
 
-    // Sky is camera-relative and must never be clipped by the portal plane.
-    // Add it directly to the camera node, outside the ClipNode subtree.
+    // Structure: camera → mPortalScene (LightManager) → { ClipNode → scene geometry,
+    //                                                       mSkyScene → weather particles }
+    // mPortalScene (LightManager) is the direct child of camera so that its StateSet
+    // (LightBuffer, LightModel/ambient, PointLightCount) is inherited by mSkyScene's
+    // weather particles. Previously mPortalScene was wrapped inside ClipNode which
+    // prevented the sky subtree from inheriting the lighting state.
+    //
+    // Migrate mPortalScene's existing children (statics, terrain, lightSources) into
+    // the ClipNode, then re-add ClipNode as a child of mPortalScene.
+    {
+        std::vector<osg::ref_ptr<osg::Node>> children;
+        children.reserve(mPortalScene->getNumChildren());
+        for (unsigned int i = 0; i < mPortalScene->getNumChildren(); ++i)
+            children.push_back(mPortalScene->getChild(i));
+        mPortalScene->removeChildren(0, mPortalScene->getNumChildren());
+        for (auto& child : children)
+            clipNode->addChild(child);
+    }
+    mPortalScene->addChild(clipNode);
+    camera->addChild(mPortalScene);
+
+    // Sky/weather: add as sibling of ClipNode inside mPortalScene. This ensures weather
+    // particles inherit the LightManager's StateSet (sun LightBuffer, ambient LightModel)
+    // while remaining outside the ClipNode so they are never clipped by the portal plane.
     if (mSkyScene)
-        camera->addChild(mSkyScene);
+        mPortalScene->addChild(mSkyScene);
 }
 
 void PortalRTTNode::apply(osg::Camera* camera)
