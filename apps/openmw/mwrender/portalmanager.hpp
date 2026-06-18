@@ -109,7 +109,6 @@ namespace MWRender
             bool destIsExterior  = false;
             bool approachActive  = false; ///< ghost mode currently active for this portal
             bool noCollision     = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
-            bool needsFlatFloor  = false; ///< always add flat floor box at portal sill (e.g. ex_cave_door_01)
             float clipBias       = 0.f;   ///< units to push RTT clip plane into dest cell to clear flush wall geometry
             osg::ref_ptr<osg::Node> decorMesh; ///< optional decorative mesh rendered alongside the portal quad
         };

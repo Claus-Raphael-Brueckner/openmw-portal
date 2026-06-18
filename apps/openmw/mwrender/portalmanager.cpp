@@ -1338,11 +1338,6 @@ namespace MWRender
             if (model.find("ex_t_") != std::string::npos || model.find("in_t_") != std::string::npos)
                 portal.noCollision = true;
 
-            // Cave doors sit flush with the ground; add a flat floor box at the portal sill
-            // so ghost mode doesn't drop the player through the terrain.
-            if (model.find("ex_cave_door") != std::string::npos
-             || model.find("in_cave_door") != std::string::npos)
-                portal.needsFlatFloor = true;
 
             // Per-door RTT clip plane bias: pushes the clip plane into the destination cell
             // to clear flush wall/frame geometry that would otherwise block the portal view.
@@ -1824,11 +1819,9 @@ namespace MWRender
 
                     const float portalSillZ = portal.planePoint.z() - portal.halfExtents.y();
 
-                    if (portal.destIsExterior)
+                    // Always place a flat platform at the portal sill so the player doesn't fall
+                    // through the floor when ghost mode strips CollisionType_World.
                     {
-                        // Player is inside an interior cell approaching an exterior portal.
-                        // Interior floor is CollisionType_World, stripped by ghost mode → always
-                        // add a flat platform so the player doesn't fall through the floor.
                         hasRamp = true;
                         halfRampWidth = 300.f;
                         halfRampLen   = 300.f;
@@ -1836,29 +1829,11 @@ namespace MWRender
                                                    portalSillZ - 5.f);
                         world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
                     }
-                    else if (portal.needsFlatFloor)
-                    {
-                        // Add a flat floor only when the player is significantly above terrain
-                        // (gap in terrain coverage, cliff edge, etc.). If terrain is right
-                        // underfoot, the existing ground handles the player's weight in ghost mode.
-                        const ESM::RefId worldspace
-                            = world->getPlayerPtr().getCell()->getCell()->getWorldSpace();
-                        const float terrainZ = world->getTerrainHeightAt(playerPos, worldspace);
-                        constexpr float kTerrainGapThreshold = 20.f;
-                        if (playerPos.z() - terrainZ > kTerrainGapThreshold)
-                        {
-                            hasRamp = true;
-                            halfRampWidth = 300.f;
-                            halfRampLen   = 300.f;
-                            rampCenter    = osg::Vec3f(portal.planePoint.x(), portal.planePoint.y(),
-                                                       portalSillZ - 5.f);
-                            world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
-                        }
-                    }
-                    // If the portal sill is more than ~1 m above the player's feet, add a ramp.
+
+                    // If the portal sill is more than ~1 m above the player's feet, also add a ramp.
                     // The ramp top surface passes through playerPos, portal-bottom-left, and
                     // portal-bottom-right — the box is tilted to match that plane exactly.
-                    else if (portalSillZ - playerPos.z() > 50.f)
+                    if (portalSillZ - playerPos.z() > 50.f)
                     {
                         const osg::Vec3f sillMid(portal.planePoint.x(), portal.planePoint.y(), portalSillZ);
                         const osg::Vec3f rampVec = sillMid - playerPos;
