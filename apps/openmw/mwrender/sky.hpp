@@ -156,6 +156,7 @@ namespace MWRender
         std::unique_ptr<Moon> mSecunda;
 
         osg::ref_ptr<osg::Group> mRainNode;
+        osg::ref_ptr<osg::Group> mPortalWeatherGroup;
         osg::ref_ptr<osgParticle::ParticleSystem> mRainParticleSystem;
         osg::ref_ptr<osgParticle::BoxPlacer> mPlacer;
         osg::ref_ptr<RainCounter> mCounter;

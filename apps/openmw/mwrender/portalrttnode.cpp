@@ -77,8 +77,9 @@ void PortalRTTNode::apply(osg::Camera* camera)
     camera->setViewMatrix(mViewMatrix);
     camera->setProjectionMatrix(mProjMatrix);
     // Mask_Sky included for exterior portals (atmosphere/clouds/moons via mSkyNode wrapper).
+    // Mask_WeatherParticles included so rain/snow/ash from the shared mPortalWeatherGroup render.
     // Mask_Sun intentionally excluded: Sun uses occlusion queries that crash with a second camera.
-    camera->setCullMask(Mask_Scene | Mask_Sky | Mask_Terrain | Mask_Static | Mask_Object | Mask_Lighting | Mask_ParticleSystem | Mask_Water | Mask_SimpleWater);
+    camera->setCullMask(Mask_Scene | Mask_Sky | Mask_Terrain | Mask_Static | Mask_Object | Mask_Lighting | Mask_ParticleSystem | Mask_Water | Mask_SimpleWater | Mask_WeatherParticles);
     // Mask_PortalQuad intentionally excluded: portal quads must not appear inside RTT views.
 
     // Update the clip plane in WORLD space. glClipPlane transforms by the current model-view

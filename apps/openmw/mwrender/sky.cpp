@@ -281,6 +281,7 @@ namespace MWRender
         }
 
         mSkyNode = new osg::Group;
+        mPortalWeatherGroup = new osg::Group;
         mSkyNode->setNodeMask(Mask_Sky);
         mSkyNode->addChild(mEarlyRenderBinRoot);
         mSkyRootNode->addChild(mSkyNode);
@@ -456,6 +457,7 @@ namespace MWRender
         mSceneManager->recreateShaders(mRainNode);
 
         mSkyNode->addChild(mRainNode);
+        mPortalWeatherGroup->addChild(mRainNode);
         if (mPrecipitationOcclusion)
             mPrecipitationOccluder->enable();
     }
@@ -465,6 +467,7 @@ namespace MWRender
         if (!mRainNode)
             return;
 
+        mPortalWeatherGroup->removeChild(mRainNode);
         mSkyNode->removeChild(mRainNode);
         mRainNode = nullptr;
         mPlacer = nullptr;
@@ -518,6 +521,11 @@ namespace MWRender
         if (mCloudNode)
             proxy->addChild(mCloudNode);
         dest->addChild(proxy);
+        // Weather particles (rain / snow / ash) are camera-relative but must NOT be in the
+        // RenderBin_Sky proxy (they need depth testing against scene geometry). Add them
+        // directly to dest so they render in the normal transparent bin after the scene pass.
+        if (mPortalWeatherGroup)
+            dest->addChild(mPortalWeatherGroup);
     }
 
     int SkyManager::getMasserPhase() const
@@ -716,6 +724,7 @@ namespace MWRender
             {
                 if (mParticleNode)
                 {
+                    mPortalWeatherGroup->removeChild(mParticleNode);
                     mSkyNode->removeChild(mParticleNode);
                     mParticleNode = nullptr;
                 }
@@ -732,6 +741,7 @@ namespace MWRender
                     mParticleNode->addCullCallback(mUnderwaterSwitch);
                     mParticleNode->setNodeMask(Mask_WeatherParticles);
                     mSkyNode->addChild(mParticleNode);
+                    mPortalWeatherGroup->addChild(mParticleNode);
                 }
 
                 mParticleEffect = mSceneManager->getInstance(mCurrentParticleEffect, mParticleNode);
