@@ -78,4 +78,4 @@ jobs:
       with:
         files: openmw-linux-${{ github.ref_name }}.tar.gz
         prerelease: true
-        draft: true
+        draft: false

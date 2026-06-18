@@ -57,4 +57,4 @@ jobs:
       with:
         files: ${{ github.workspace }}/build/OpenMW-*.dmg
         prerelease: true
-        draft: true
+        draft: false
