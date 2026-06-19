@@ -40,8 +40,10 @@
 
 #include <components/esm3/loadacti.hpp>
 #include <components/esm3/loadcont.hpp>
+#include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loaddoor.hpp>
 #include <components/esm3/loadligh.hpp>
+#include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadstat.hpp>
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
@@ -71,11 +73,17 @@
 #include <components/vfs/pathutil.hpp>
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/ptr.hpp"
+
+#include "animation.hpp"
+#include "blendmask.hpp"
+#include "creatureanimation.hpp"
+#include "npcanimation.hpp"
 
 #include "portalrttnode.hpp"
 #include "ripples.hpp"
@@ -1474,6 +1482,81 @@ namespace MWRender
                 mSkyManager, osg::Vec2f(float(screenW), float(screenH)),
                 mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, mExteriorSkyColor);
 
+            // Create portal-specific actor animations for NPCs and creatures in the destination cell.
+            // Skipped when the user has disabled actor rendering in portals.
+            // We build fresh NpcAnimation / CreatureAnimation instances with a portal-owned PAT as
+            // parent so we never touch ptr.getRefData().mBaseNode (which belongs to the main scene).
+            // The destination CellStore is State_Loaded (ESM data and inventory in memory), which is
+            // all these animation classes need.  No CharacterController is created, so we call
+            // play("idle") ourselves to get a natural standing pose instead of a T-pose bind pose.
+            if (Settings::portal().mShowActors
+                && destCellStore && destCellStore->getState() == MWWorld::CellStore::State_Loaded)
+            {
+                auto createActorAnim = [&](const MWWorld::Ptr& ptr) -> bool {
+                    if (!MWWorld::CellStore::isAccessible(ptr.getRefData(), ptr.getCellRef()))
+                        return true;
+                    if (!ptr.getRefData().isEnabled())
+                        return true;
+
+                    // Build a PAT for world-space position / rotation / scale.
+                    osg::ref_ptr<SceneUtil::PositionAttitudeTransform> pat
+                        = new SceneUtil::PositionAttitudeTransform;
+                    pat->setNodeMask(Mask_Actor);
+
+                    const float* pos = ptr.getRefData().getPosition().pos;
+                    const float* rot = ptr.getRefData().getPosition().rot;
+                    pat->setPosition(osg::Vec3f(pos[0], pos[1], pos[2]));
+                    pat->setAttitude(osg::Quat(rot[0], osg::Vec3f(1, 0, 0))
+                        * osg::Quat(rot[1], osg::Vec3f(0, 1, 0))
+                        * osg::Quat(rot[2], osg::Vec3f(0, 0, 1)));
+                    const float scale = ptr.getCellRef().getScale();
+                    osg::Vec3f scaleVec(scale, scale, scale);
+                    ptr.getClass().adjustScale(ptr, scaleVec, true);
+                    pat->setScale(scaleVec);
+
+                    osg::ref_ptr<Animation> anim;
+                    try
+                    {
+                        if (ptr.getClass().isNpc())
+                        {
+                            anim = new NpcAnimation(ptr, osg::ref_ptr<osg::Group>(pat), mResourceSystem,
+                                /*disableSounds=*/true);
+                        }
+                        else
+                        {
+                            const std::string model = ptr.getClass().getCorrectedModel(ptr);
+                            if (model.empty())
+                                return true;
+                            const std::string animModel
+                                = Misc::ResourceHelpers::correctActorModelPath(
+                                    VFS::Path::toNormalized(model), mResourceSystem->getVFS());
+                            const bool animated = !(animModel == model
+                                && Misc::StringUtils::ciEndsWith(animModel, ".nif"));
+                            anim = new CreatureAnimation(ptr, animModel, mResourceSystem, animated,
+                                osg::ref_ptr<osg::Group>(pat));
+                        }
+
+                        // Play idle to reach a natural standing pose (CharacterController would do
+                        // this normally; without it the skeleton stays in bind/T-pose).
+                        if (anim->hasAnimation("idle"))
+                            anim->play("idle", 1, BlendMask::BlendMask_All, false, 1.0f,
+                                "start", "stop", 0.0f, std::numeric_limits<uint32_t>::max(), true);
+                        anim->runAnimation(0.f);
+
+                        sceneResult.scene->addChild(pat);
+                        portal.actorAnimations.push_back(std::move(anim));
+                    }
+                    catch (const std::exception& e)
+                    {
+                        Log(Debug::Warning) << "PortalManager: failed to create actor animation: " << e.what();
+                    }
+                    return true;
+                };
+
+                destCellStore->forEachType<ESM::NPC>(createActorAnim);
+                destCellStore->forEachType<ESM::Creature>(createActorAnim);
+            }
+
             const bool hasWater = portal.destIsExterior && destCellStore && destCellStore->getCell()->hasWater();
 
             if (hasWater && mRttParent)
@@ -1585,6 +1668,7 @@ namespace MWRender
         portal.sunLight          = nullptr;
         portal.lightModelAttr    = nullptr;
         portal.waterSkyTex       = nullptr;
+        portal.actorAnimations.clear();
 
         // If ghost mode was active for this portal, clear the flag so the watchdog
         // in update() sees no active portal and disables ghost mode + removes physics objects.
@@ -1604,7 +1688,7 @@ namespace MWRender
             && std::abs(local.z()) < portal.halfExtents.y() + kMargin;
     }
 
-    void PortalManager::update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused)
+    void PortalManager::update(float dt, const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused)
     {
         // Watchdog: if ghost mode is active but no portal claims it (e.g. the portal was
         // destroyed during cell unloading), clean up here in a stable physics state.
@@ -1656,6 +1740,11 @@ namespace MWRender
             if (portal.lightModelAttr)
                 portal.lightModelAttr->setAmbientIntensity(mExteriorAmbient);
         }
+
+        // Advance portal actor animations (idle loop) each frame.
+        for (auto& portal : mPortals)
+            for (auto& anim : portal.actorAnimations)
+                anim->runAnimation(dt);
 
         // Extract eye position, look, and up from the view matrix.
         // Eye position: view matrix M transforms world→eye. Camera origin = -R^T * t

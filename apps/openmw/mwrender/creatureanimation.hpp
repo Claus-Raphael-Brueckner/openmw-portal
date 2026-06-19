@@ -17,6 +17,9 @@ namespace MWRender
     public:
         CreatureAnimation(
             const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem, bool animated);
+        // Portal overload: explicit parentNode so we don't touch ptr.getRefData().mBaseNode
+        CreatureAnimation(const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem,
+            bool animated, osg::ref_ptr<osg::Group> parentNode);
         virtual ~CreatureAnimation() {}
     };
 

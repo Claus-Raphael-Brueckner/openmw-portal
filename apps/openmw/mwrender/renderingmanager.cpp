@@ -718,7 +718,7 @@ namespace MWRender
                 osg::Vec3f(mWeatherSunPos.x(), mWeatherSunPos.y(), mWeatherSunPos.z()));
             const MWWorld::Ptr& player = mPlayerAnimation->getPtr();
             osg::Vec3f playerPos(player.getRefData().getPosition().asVec3());
-            mPortalManager->update(playerPos, mViewer->getCamera()->getViewMatrix(),
+            mPortalManager->update(dt, playerPos, mViewer->getCamera()->getViewMatrix(),
                 mViewer->getCamera()->getProjectionMatrix(), paused);
         }
 

@@ -9,6 +9,7 @@
 #include <osg/Vec4f>
 #include <osg/Node>
 #include <osg/ref_ptr>
+#include <osg/Referenced>
 
 #include "../mwworld/ptr.hpp"
 #include <components/esm/position.hpp>
@@ -35,6 +36,7 @@ namespace Resource
 
 namespace MWRender
 {
+    class Animation;
     class PortalRTTNode;
     class SkyManager;
 
@@ -57,7 +59,7 @@ namespace MWRender
 
         /// Called every frame. Checks whether the player has crossed any portal plane and
         /// triggers teleportation. Only runs when not paused.
-        void update(const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused);
+        void update(float dt, const osg::Vec3f& playerPos, const osg::Matrixd& viewMatrix, const osg::Matrixd& projMatrix, bool paused);
 
         /// Provide the main terrain root so exterior portals can share it in their RTT scene.
         void setExteriorTerrainNode(osg::Group* terrain) { mExteriorTerrainNode = terrain; }
@@ -111,6 +113,7 @@ namespace MWRender
             bool noCollision     = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
             float clipBias       = 0.f;   ///< units to push RTT clip plane into dest cell to clear flush wall geometry
             osg::ref_ptr<osg::Node> decorMesh; ///< optional decorative mesh rendered alongside the portal quad
+            std::vector<osg::ref_ptr<Animation>> actorAnimations; ///< per-portal actor animations (idle pose, updated each frame)
         };
 
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter, osg::Quat& inOutNifRot) const;

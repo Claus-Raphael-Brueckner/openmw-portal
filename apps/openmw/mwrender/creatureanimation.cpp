@@ -35,6 +35,24 @@ namespace MWRender
         }
     }
 
+    CreatureAnimation::CreatureAnimation(const MWWorld::Ptr& ptr, const std::string& model,
+        Resource::ResourceSystem* resourceSystem, bool animated, osg::ref_ptr<osg::Group> parentNode)
+        : ActorAnimation(ptr, std::move(parentNode), resourceSystem)
+    {
+        MWWorld::LiveCellRef<ESM::Creature>* ref = mPtr.get<ESM::Creature>();
+
+        if (!model.empty())
+        {
+            setObjectRoot(model, false, false, true);
+
+            if ((ref->mBase->mFlags & ESM::Creature::Bipedal))
+                addAnimSource(Settings::models().mXbaseanim.get(), model);
+
+            if (animated)
+                addAnimSource(model, model);
+        }
+    }
+
     CreatureWeaponAnimation::CreatureWeaponAnimation(
         const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem, bool animated)
         : ActorAnimation(ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), resourceSystem)
