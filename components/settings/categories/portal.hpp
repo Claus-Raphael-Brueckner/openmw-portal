@@ -10,7 +10,6 @@ namespace Settings
         using WithIndex::WithIndex;
 
         SettingValue<bool> mDebugGeometry{ mIndex, "Portal", "debug geometry" };
-        SettingValue<bool> mShowActors{ mIndex, "Portal", "show actors", false };
 
         // Semicolon-separated interior cell names whose ex_common_door_01 portals need
         // the quad offset along its outward axis (L-shaped entrance frame alignment).
