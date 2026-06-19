@@ -155,6 +155,18 @@ namespace MWRender
 			"ex_colony_door08.nif",
 			"ex_colony_bardoor.nif",
 			"ex_colony_minedoor.nif",
+			"ex_s_door.nif",
+			"ex_s_door_double.nif",
+			"ex_s_door_double_gh.nif",
+			"ex_s_door_double_fixed.nif",
+			"ex_s_door_double_fixing.nif",
+			"ex_s_door_rigmor.nif",
+			"ex_s_door_rigmor2.nif",
+			"ex_s_door_rounded.nif",
+			"in_s_door.nif",
+			"in_s_doorjam.nif",
+			"in_s_doorjam_rounded.nif",
+			"in_s_doorway.nif",
         };
         // 1×1 RGBA8 texture filled with a constant color.
         osg::ref_ptr<osg::Texture2D> makeSolidTexture(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
