@@ -155,6 +155,14 @@ namespace MWRender
 			"ex_colony_door08.nif",
 			"ex_colony_bardoor.nif",
 			"ex_colony_minedoor.nif",
+			"bm_ic_door_01.nif",
+			"bm_ic_door_pelt.nif",
+			"bm_ic_door_pelt_dark.nif",
+			"bm_ic_door_pelt_wolf.nif",
+			"ex_bm_tomb_door_01.nif",
+			"ex_bm_tomb_door_02.nif",
+			"ex_bm_tomb_door_03.nif",
+			"ex_bm_tomb_door_skaalara.nif",
 			"ex_s_door.nif",
 			"ex_s_door_double.nif",
 			"ex_s_door_double_gh.nif",
@@ -960,12 +968,14 @@ namespace MWRender
         const auto* base = door.get<ESM::Door>()->mBase;
         if (!base)
             return false;
-        std::string model = base->mModel;
-        Misc::StringUtils::lowerCaseInPlace(model);
-        for (const auto& pattern : sPortalModels)
-            if (model.find(pattern) != std::string::npos)
-                return true;
-        return false;
+        // Model list check disabled — all teleport doors are rendered as portals.
+        // std::string model = base->mModel;
+        // Misc::StringUtils::lowerCaseInPlace(model);
+        // for (const auto& pattern : sPortalModels)
+        //     if (model.find(pattern) != std::string::npos)
+        //         return true;
+        // return false;
+        return true;
     }
 
     osg::Vec2f PortalManager::computeHalfExtents(
@@ -1375,6 +1385,13 @@ namespace MWRender
             osg::Matrix m = quadNode->getMatrix();
             m.setTrans(m.getTrans() + osg::Vec3d(pushLocal));
             quadNode->setMatrix(m);
+            // Keep quadCenter and planePoint in sync with the pushed quad position.
+            // The RTT camera uses quadCenter as reference; without this update it is 10 units
+            // off, which shifts the virtual camera into the destination and causes the clip
+            // plane to appear as a gap at the portal edge when viewed from inside.
+            const osg::Vec3f pushWorld = portal.planeNormal * kWallClearance;
+            portal.quadCenter += pushWorld;
+            portal.planePoint += pushWorld;
         }
 
         // Per-model overrides: shape mask and collision behaviour.
@@ -1400,7 +1417,9 @@ namespace MWRender
 
             if (model.find("ex_imp_loaddoor_02") != std::string::npos
              || model.find("in_impsmall_loaddoor_01") != std::string::npos
-             || model.find("ex_redoran_hut_01_a") != std::string::npos)
+             || model.find("ex_redoran_hut_01_a") != std::string::npos
+             || model.find("ex_s_door_rounded") != std::string::npos
+             || model.find("in_s_doorjam_rounded") != std::string::npos)
             {
                 osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
                 mss->getUniform("portalMaskType")->set(1);
