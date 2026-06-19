@@ -1503,8 +1503,8 @@ namespace MWRender
                         = new SceneUtil::PositionAttitudeTransform;
                     pat->setNodeMask(Mask_Actor);
 
-                    const float* pos = ptr.getRefData().getPosition().pos;
-                    const float* rot = ptr.getRefData().getPosition().rot;
+                    const float* pos = ptr.getCellRef().getPosition().pos;
+                    const float* rot = ptr.getCellRef().getPosition().rot;
                     pat->setPosition(osg::Vec3f(pos[0], pos[1], pos[2]));
                     pat->setAttitude(osg::Quat(rot[0], osg::Vec3f(1, 0, 0))
                         * osg::Quat(rot[1], osg::Vec3f(0, 1, 0))
