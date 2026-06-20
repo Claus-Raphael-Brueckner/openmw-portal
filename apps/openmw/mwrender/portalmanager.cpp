@@ -223,15 +223,12 @@ namespace MWRender
         }
 
         // Magenta wireframe group visualising the portal collision shapes:
-        // floor/ramp box, two edge cylinders, two wing boxes (Mask_Debug → main view only).
+        // floor/ramp box and two edge cylinders (Mask_Debug → main view only).
         [[maybe_unused]] osg::ref_ptr<osg::Group> buildPortalCollisionDebug(
             bool hasFloor, const osg::Vec3f& floorCenter, const osg::Quat& floorRot,
             float floorHalfX, float floorHalfY,
             const osg::Vec3f& cylLeft, const osg::Vec3f& cylRight,
-            float cylRadius, float cylHalfH,
-            const osg::Vec3f& wingLeftCenter, const osg::Vec3f& wingRightCenter,
-            const osg::Quat& wingRot,
-            float wingHalfX, float wingHalfY, float wingHalfZ)
+            float cylRadius, float cylHalfH)
         {
             osg::ref_ptr<osg::Group> grp = new osg::Group;
             grp->setNodeMask(Mask_Debug);
@@ -266,9 +263,6 @@ namespace MWRender
 
             grp->addChild(colorShape(new osg::Cylinder(cylLeft,  cylRadius, 2.f * cylHalfH)));
             grp->addChild(colorShape(new osg::Cylinder(cylRight, cylRadius, 2.f * cylHalfH)));
-
-            addBox(grp.get(), wingLeftCenter,  wingRot, wingHalfX, wingHalfY, wingHalfZ);
-            addBox(grp.get(), wingRightCenter, wingRot, wingHalfX, wingHalfY, wingHalfZ);
 
             return grp;
         }
@@ -1934,7 +1928,7 @@ namespace MWRender
             // Strips CollisionType_World so rocks/walls don't block the path through the portal.
             // Needed for exterior→interior portals (cave entrance rocks) and for interior→exterior
             // portals where the indoor cell has no physical opening behind the door frame.
-            constexpr float kApproachDist = 180.f;
+            constexpr float kApproachDist = 80.f;
             const bool inApproachZone = !portal.noCollision
                 && portal.lastSide && dist >= 0.f && dist < kApproachDist
                 && isWithinBounds(eyePos, portal);
@@ -1961,16 +1955,23 @@ namespace MWRender
                     osg::Quat  rampRot;
                     float halfRampWidth = 0.f, halfRampLen = 0.f;
 
+                    // Portal rotation: maps portal-local axes to world space.
+                    // Local X = width direction, local -Y = toward player, local Z = up.
+                    const osg::Quat portalRot = portal.invRot.inverse();
+
                     const float portalSillZ = portal.planePoint.z() - portal.halfExtents.y();
 
-                    // Always place a flat platform at the portal sill so the player doesn't fall
-                    // through the floor when ghost mode strips CollisionType_World.
+                    // Flat platform at the portal sill, aligned with the portal plane.
+                    // Center in portal-local space: (0, -halfLen, -(halfExtents.y + 5))
+                    //   → halfLen units toward the player, 5 units below the sill.
                     {
-                        hasRamp = true;
-                        halfRampWidth = 300.f;
-                        halfRampLen   = 300.f;
-                        rampCenter    = osg::Vec3f(portal.planePoint.x(), portal.planePoint.y(),
-                                                   portalSillZ - 5.f);
+                        hasRamp       = true;
+                        halfRampWidth = portal.halfExtents.x() + 30.f;
+                        halfRampLen   = 60.f;
+                        rampRot       = portalRot;
+                        rampCenter    = portal.planePoint
+                            + portalRot * osg::Vec3f(0.f, -halfRampLen,
+                                                     -(portal.halfExtents.y() + 5.f));
                         world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
                     }
 
@@ -2013,32 +2014,21 @@ namespace MWRender
                     }
 
                     // Two angled guide walls funnelling the player toward the portal opening.
-                    world->addPortalGuideWalls(portal.planePoint, portal.invRot.inverse(),
+                    world->addPortalGuideWalls(portal.planePoint, portalRot,
                         portal.halfExtents.x(), portal.halfExtents.y());
 
                     // Debug: show collision shapes as magenta wireframe (settings.cfg: [Portal] debug geometry).
                     if (Settings::portal().mDebugGeometry)
                     {
                         constexpr float wallRadius = 45.f;
-                        constexpr float wingHalfX  = 200.f;
-                        constexpr float wingHalfY  = 100.f;
-                        const float     wingHalfZ  = portal.halfExtents.y() + 100.f;
-                        const osg::Quat portalRot  = portal.invRot.inverse();
-                        // Cylinders sit at Y=0 (portal face); wings sit at -Y (toward player).
                         auto atFace = [&](float localX) -> osg::Vec3f {
                             return portal.planePoint + portalRot * osg::Vec3f(localX, 0.f, 0.f);
-                        };
-                        auto atWing = [&](float localX) -> osg::Vec3f {
-                            return portal.planePoint + portalRot * osg::Vec3f(localX, -wingHalfY, 0.f);
                         };
                         mDebugShapesNode = buildPortalCollisionDebug(
                             hasRamp, rampCenter, rampRot, halfRampWidth, halfRampLen,
                             atFace(-(portal.halfExtents.x() + wallRadius)),
                             atFace( (portal.halfExtents.x() + wallRadius)),
-                            wallRadius, portal.halfExtents.y(),
-                            atWing(-(portal.halfExtents.x() + wingHalfX)),
-                            atWing( (portal.halfExtents.x() + wingHalfX)),
-                            portalRot, wingHalfX, wingHalfY, wingHalfZ);
+                            wallRadius, portal.halfExtents.y());
                         mRttParent->addChild(mDebugShapesNode);
                     }
                 }

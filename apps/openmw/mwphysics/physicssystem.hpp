@@ -350,10 +350,7 @@ namespace MWPhysics
 
         std::unique_ptr<btCollisionObject> mPortalWallLeft;
         std::unique_ptr<btCollisionObject> mPortalWallRight;
-        std::unique_ptr<btCollisionShape>  mPortalWallShape;   // cylinder shape (shared)
-        std::unique_ptr<btCollisionObject> mPortalWingLeft;
-        std::unique_ptr<btCollisionObject> mPortalWingRight;
-        std::unique_ptr<btCollisionShape>  mPortalWingShape;   // wing box shape (shared)
+        std::unique_ptr<btCollisionShape>  mPortalWallShape;
 
         std::unique_ptr<MWRender::DebugDrawer> mDebugDrawer;
 
