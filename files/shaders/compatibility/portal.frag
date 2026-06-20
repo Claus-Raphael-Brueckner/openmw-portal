@@ -33,6 +33,16 @@ void main()
         // World-space circle test: du² + (dv*aspect)² ≤ 0.25
         if (du * du + dv * dv * portalAspect * portalAspect > 0.25) discard;
     }
+    else if (portalMaskType == 3)
+    {
+        // Upper arc: circle top-aligned with the quad (same position as the arch in type 1),
+        // but without the rectangle below — only the circular portion remains.
+        // y_center in UV: 1 - 0.5/aspect  (aspect = halfHeight/halfWidth)
+        float yc = 1.0 - 0.5 / portalAspect;
+        float du = v_texCoord.x - 0.5;
+        float dv = v_texCoord.y - yc;
+        if (du * du + dv * dv * portalAspect * portalAspect > 0.25) discard;
+    }
 
     vec2 uv = v_clipPos.xy / v_clipPos.w * 0.5 + 0.5;
     gl_FragData[0] = texture2D(portalTex, uv);

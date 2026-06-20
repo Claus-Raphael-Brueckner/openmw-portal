@@ -1461,7 +1461,9 @@ namespace MWRender
              || model.find("in_impsmall_loaddoor_01") != std::string::npos
              || model.find("ex_redoran_hut_01_a") != std::string::npos
              || model.find("ex_s_door_rounded") != std::string::npos
-             || model.find("in_s_doorjam_rounded") != std::string::npos)
+             || model.find("in_s_doorjam_rounded") != std::string::npos
+             || model.find("ex_mh_door_02") != std::string::npos
+             || model.find("ex_mh_door_01") != std::string::npos)
             {
                 osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
                 mss->getUniform("portalMaskType")->set(1);
@@ -1474,6 +1476,12 @@ namespace MWRender
             {
                 osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
                 mss->getUniform("portalMaskType")->set(2);
+                mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
+            }
+            else if (model.find("ex_v_cantondoor_01") != std::string::npos)
+            {
+                osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
+                mss->getUniform("portalMaskType")->set(3);
                 mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
             }
         }
