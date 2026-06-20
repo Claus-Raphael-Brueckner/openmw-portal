@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include <osg/Fog>
 #include <osg/Quat>
 #include <osg/Vec2f>
 #include <osg/Vec3f>
@@ -71,6 +72,17 @@ namespace MWRender
         /// Update the near clip distance used for the water refraction depth linearization.
         void setNearClip(float v) { mNearClip = v; }
 
+        /// Update the player's configured view distance (used for interior fog matching).
+        void setViewDistance(float v) { mViewDistance = v; }
+
+        /// Update exterior fog parameters (weather-based; used for quasi-exterior portal scenes).
+        void setExteriorFog(float start, float end, const osg::Vec4f& color)
+        {
+            mExteriorFogStart = start;
+            mExteriorFogEnd   = end;
+            mExteriorFogColor = color;
+        }
+
         /// Provide the SkyManager so exterior portals can fetch mSkyNode lazily (after sky is created).
         void setSkyManager(SkyManager* sky) { mSkyManager = sky; }
 
@@ -106,6 +118,7 @@ namespace MWRender
             osg::ref_ptr<osg::Light>         sunLight;        ///< updated each frame with current sun
             osg::ref_ptr<osg::LightModel>    lightModelAttr;  ///< updated each frame with current ambient
             float waterHeight = 0.f;
+            osg::ref_ptr<osg::Fog> sceneFog; ///< non-null for quasi-exterior portals; updated per-frame
             bool destIsExterior      = false;
             bool destIsQuasiExterior = false; ///< fake-outdoor interior (Tribunal/Mournhold style)
             bool approachActive  = false; ///< ghost mode currently active for this portal
@@ -139,6 +152,10 @@ namespace MWRender
         osg::Vec4f  mExteriorDiffuse       = osg::Vec4f(0.85f, 0.80f, 0.70f, 1.f);
         osg::Vec3f  mExteriorSunDir        = osg::Vec3f(0.5f, -0.5f, 1.f);
         float       mNearClip              = 1.f;
+        float       mViewDistance          = 6000.f;
+        float       mExteriorFogStart      = 1e8f;
+        float       mExteriorFogEnd        = 1e8f;
+        osg::Vec4f  mExteriorFogColor;
         osg::ref_ptr<osg::Group> mDebugShapesNode; ///< Mask_Debug wireframe for active portal collision geometry
         double      mLastCrossingMs        = -1e9; ///< steady_clock ms at last portal crossing (for rapid-crossing log)
     };

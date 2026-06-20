@@ -819,6 +819,7 @@ namespace MWRender
             osg::ref_ptr<osg::Group>      scene;
             osg::ref_ptr<osg::Light>      sunLight;
             osg::ref_ptr<osg::LightModel> lightModelAttr;
+            osg::ref_ptr<osg::Fog>        sceneFog;  ///< non-null for quasi-exterior; updated per-frame by caller
             float                         waterHeight = 0.f;
         };
 
@@ -873,11 +874,29 @@ namespace MWRender
             ss->addUniform(new osg::Uniform("emissiveMult", 1.f));
             ss->addUniform(new osg::Uniform("specStrength", 1.f));
 
-            // Disable fog (shaders don't respect glDisable(GL_FOG)).
+            // Fog: quasi-exterior cells (Mournhold-style) carry interior fog data — apply it so
+            // the view through the portal matches what the player sees after crossing.
+            // All other portal scenes keep fog disabled (exterior uses weather fog, regular
+            // interiors are typically close enough that the difference isn't noticeable).
             osg::ref_ptr<osg::Fog> fog = new osg::Fog;
-            fog->setStart(100000000.f);
-            fog->setEnd(100000000.f);
-            ss->setAttributeAndModes(fog, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+            fog->setMode(osg::Fog::LINEAR);
+            osg::ref_ptr<osg::Fog> sceneFogOut;
+            const bool needsWeatherFog = cellStore
+                && (cellStore->getCell()->isExterior() || cellStore->getCell()->isQuasiExterior());
+            if (needsWeatherFog)
+            {
+                // Initial values; caller updates this fog object every frame via portal.sceneFog.
+                fog->setStart(1e8f);
+                fog->setEnd(1e8f);
+                ss->setAttributeAndModes(fog, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+                sceneFogOut = fog;
+            }
+            else
+            {
+                fog->setStart(1e8f);
+                fog->setEnd(1e8f);
+                ss->setAttributeAndModes(fog, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
+            }
 
             SceneUtil::ShadowManager::instance().disableShadowsForStateSet(*ss);
 
@@ -976,7 +995,7 @@ namespace MWRender
             if (isExterior && cellStore->getCell()->hasWater())
                 waterHeight = cellStore->getCell()->getWaterHeight();
 
-            return PortalSceneResult{ lightManager, light, lightModel, waterHeight };
+            return PortalSceneResult{ lightManager, light, lightModel, sceneFogOut, waterHeight };
         }
 
     }
@@ -1639,6 +1658,7 @@ namespace MWRender
 
             portal.sunLight       = sceneResult.sunLight;
             portal.lightModelAttr = sceneResult.lightModelAttr;
+            portal.sceneFog       = sceneResult.sceneFog;
 
             osg::ref_ptr<osg::Group> skyScene;
             if ((portal.destIsExterior || portal.destIsQuasiExterior) && mSkyManager)
@@ -1722,6 +1742,7 @@ namespace MWRender
         portal.portalScene       = nullptr;
         portal.sunLight          = nullptr;
         portal.lightModelAttr    = nullptr;
+        portal.sceneFog          = nullptr;
         portal.waterSkyTex       = nullptr;
 
         // If ghost mode was active for this portal, clear the flag so the watchdog
@@ -1793,6 +1814,12 @@ namespace MWRender
             }
             if (portal.lightModelAttr)
                 portal.lightModelAttr->setAmbientIntensity(mExteriorAmbient);
+            if (portal.sceneFog)
+            {
+                portal.sceneFog->setStart(mExteriorFogStart);
+                portal.sceneFog->setEnd(mExteriorFogEnd);
+                portal.sceneFog->setColor(mExteriorFogColor);
+            }
         }
 
         // Extract eye position, look, and up from the view matrix.

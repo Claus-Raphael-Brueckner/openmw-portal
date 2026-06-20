@@ -712,6 +712,9 @@ namespace MWRender
         {
             mPortalManager->setExteriorSkyColor(mSky->getSkyColor());
             mPortalManager->setNearClip(mNearClip);
+            mPortalManager->setViewDistance(mViewDistance);
+            mPortalManager->setExteriorFog(
+                mFog->getFogStart(false), mFog->getFogEnd(false), mFog->getFogColor(false));
             mPortalManager->setExteriorLighting(
                 mWeatherAmbient,
                 mWeatherSunDiffuse,
