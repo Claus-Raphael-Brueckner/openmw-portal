@@ -206,6 +206,7 @@ namespace MWRender
             "in_m_sewer_trapdoor_01",
             "in_m_sewer_trapdoor_01_blkd",
             "chargen_shipdoor",
+			"ex_mh_pav_gate_door",
         };
 
         // 1×1 RGBA8 texture filled with a constant color.
@@ -829,14 +830,14 @@ namespace MWRender
             const osg::Vec4f& ambient,
             const osg::Vec4f& diffuse,
             const osg::Vec3f& sunDir,
+            float maxDist,
             const osg::Vec4f& skyColor = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f))
         {
-            constexpr float kMaxDist = 5000.f;
-            osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, kMaxDist);
+            osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, maxDist);
             // One LightListCallback on the whole group with an explicit large bound so it always
             // intersects with any light in the scene. Individual PAT bounds may be invalid before
             // the first render, causing per-PAT callbacks to silently skip all lights.
-            statics->setInitialBound(osg::BoundingSphere(osg::Vec3f(destCenter), kMaxDist));
+            statics->setInitialBound(osg::BoundingSphere(osg::Vec3f(destCenter), maxDist));
             statics->addCullCallback(new SceneUtil::LightListCallback);
 
             osg::ref_ptr<SceneUtil::LightManager> lightManager
@@ -928,7 +929,7 @@ namespace MWRender
             osg::ref_ptr<PortalLightRefresher> refresher = new PortalLightRefresher(lightManager.get());
             if (cellStore)
             {
-                const float maxDistSq = kMaxDist * kMaxDist;
+                const float maxDistSq = maxDist * maxDist;
                 for (const auto& ref : cellStore->getReadOnlyLights().mList)
                 {
                     if (!ref.mBase) continue;
@@ -1588,10 +1589,13 @@ namespace MWRender
             const auto screenW = static_cast<uint32_t>(Settings::video().mResolutionX);
             const auto screenH = static_cast<uint32_t>(Settings::video().mResolutionY);
 
+            // Quasi-exterior cells (Mournhold/Tribunal) can have large architecture meshes
+            // whose ESM spawn position lies far from the portal door — use a wider search radius.
+            const float sceneMaxDist = portal.destIsQuasiExterior ? 20000.f : 5000.f;
             PortalSceneResult sceneResult = buildPortalScene(
                 destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode,
                 mSkyManager, osg::Vec2f(float(screenW), float(screenH)),
-                mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, mExteriorSkyColor);
+                mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, sceneMaxDist, mExteriorSkyColor);
 
 
             const bool hasWater = portal.destIsExterior && destCellStore && destCellStore->getCell()->hasWater();
@@ -1647,7 +1651,11 @@ namespace MWRender
                 // to avoid a visible gap at the portal edge.
                 portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos + destFwd * portal.clipBias);
             }
-            portal.rttNode->setClipEnabled(true);
+            // Quasi-exterior cells (Mournhold) are self-contained — only their own statics are
+            // loaded, so there is no outside geometry to accidentally reveal. The clip plane would
+            // cut through interior geometry because destDoorPos carries a model-center offset that
+            // can push the plane well into the cell, clipping floors and distant walls.
+            portal.rttNode->setClipEnabled(!portal.destIsQuasiExterior);
             portal.rttNode->setNodeMask(Mask_RenderToTexture);
             if (mRttParent)
                 mRttParent->addChild(portal.rttNode);
