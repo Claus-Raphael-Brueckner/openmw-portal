@@ -666,6 +666,11 @@ namespace MWRender
         float fogDepth, float underwaterFog, float dlFactor, float dlOffset, const osg::Vec4f& color)
     {
         mFog->configure(mViewDistance, fogDepth, underwaterFog, dlFactor, dlOffset, color);
+        // Cache the exterior (weather-based) fog so portals can use it even when the player
+        // is indoors (WeatherManager skips configureFog entirely for interior cells).
+        mExteriorFogStart = mFog->getFogStart(false);
+        mExteriorFogEnd   = mFog->getFogEnd(false);
+        mExteriorFogColor = mFog->getFogColor(false);
     }
 
     SkyManager* RenderingManager::getSkyManager()
@@ -713,8 +718,7 @@ namespace MWRender
             mPortalManager->setExteriorSkyColor(mSky->getSkyColor());
             mPortalManager->setNearClip(mNearClip);
             mPortalManager->setViewDistance(mViewDistance);
-            mPortalManager->setExteriorFog(
-                mFog->getFogStart(false), mFog->getFogEnd(false), mFog->getFogColor(false));
+            mPortalManager->setExteriorFog(mExteriorFogStart, mExteriorFogEnd, mExteriorFogColor);
             mPortalManager->setExteriorLighting(
                 mWeatherAmbient,
                 mWeatherSunDiffuse,

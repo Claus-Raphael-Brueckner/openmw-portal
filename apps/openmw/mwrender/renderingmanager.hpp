@@ -376,6 +376,9 @@ namespace MWRender
 
         float mNearClip;
         float mViewDistance;
+        float mExteriorFogStart = 1e8f;
+        float mExteriorFogEnd   = 1e8f;
+        osg::Vec4f mExteriorFogColor;
         bool mFieldOfViewOverridden;
         float mFieldOfViewOverride;
         float mFieldOfView;
