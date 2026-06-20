@@ -106,7 +106,8 @@ namespace MWRender
             osg::ref_ptr<osg::Light>         sunLight;        ///< updated each frame with current sun
             osg::ref_ptr<osg::LightModel>    lightModelAttr;  ///< updated each frame with current ambient
             float waterHeight = 0.f;
-            bool destIsExterior  = false;
+            bool destIsExterior      = false;
+            bool destIsQuasiExterior = false; ///< fake-outdoor interior (Tribunal/Mournhold style)
             bool approachActive  = false; ///< ghost mode currently active for this portal
             bool noCollision     = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
             float clipBias       = 0.f;   ///< units to push RTT clip plane into dest cell to clear flush wall geometry

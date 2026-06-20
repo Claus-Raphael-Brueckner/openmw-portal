@@ -203,8 +203,6 @@ namespace MWRender
             "ab_door_ropeshort",
             "ex_mh_sewer_trapdoor_01",
             "ex_mh_sewer_trapdoor_sadri",
-            "ex_mh_pav_gate_door",
-            "ex_mh_palace_gate",
             "in_m_sewer_trapdoor_01",
             "in_m_sewer_trapdoor_01_blkd",
             "chargen_shipdoor",
@@ -887,13 +885,14 @@ namespace MWRender
             dummyTex->setShadowCompareFunc(osg::Texture::ShadowCompareFunc::ALWAYS);
             ss->setTextureAttributeAndModes(7, dummyTex, osg::StateAttribute::ON);
 
-            // Directional light: for interiors use cell mood; for exteriors use the caller-supplied
-            // values (updated each frame from RenderingManager with real sun direction/color).
+            // Directional light: for interiors use cell mood; for exteriors (and quasi-exteriors
+            // like Mournhold) use the caller-supplied values updated each frame from RenderingManager.
             osg::Vec4f effectiveAmbient = ambient;
             osg::Vec4f effectiveDiffuse = diffuse;
             osg::Vec4f effectiveSunPos  = osg::Vec4f(sunDir, 0.f);
             const bool isExterior = cellStore && cellStore->getCell()->isExterior();
-            if (cellStore && !isExterior)
+            const bool isQuasiExterior = cellStore && !isExterior && cellStore->getCell()->isQuasiExterior();
+            if (cellStore && !isExterior && !isQuasiExterior)
             {
                 const MWWorld::Cell* cell = cellStore->getCell();
                 effectiveAmbient = SceneUtil::colourFromRGB(cell->getMood().mAmbiantColor);
@@ -1303,7 +1302,9 @@ namespace MWRender
             {
                 MWWorld::CellStore* destCellStore
                     = MWBase::Environment::get().getWorld()->findCellStore(destCellId);
-                portal.destIsExterior = destCellStore && destCellStore->getCell()->isExterior();
+                portal.destIsExterior      = destCellStore && destCellStore->getCell()->isExterior();
+                portal.destIsQuasiExterior = destCellStore && !portal.destIsExterior
+                                             && destCellStore->getCell()->isQuasiExterior();
                 if (destCellStore)
                 {
                     const ESM::RefId sourceCellId = door.getCell()->getCell()->getId();
@@ -1626,7 +1627,7 @@ namespace MWRender
             portal.lightModelAttr = sceneResult.lightModelAttr;
 
             osg::ref_ptr<osg::Group> skyScene;
-            if (portal.destIsExterior && mSkyManager)
+            if ((portal.destIsExterior || portal.destIsQuasiExterior) && mSkyManager)
             {
                 osg::ref_ptr<CameraRelativeTransform> skyWrapper = new CameraRelativeTransform;
                 skyWrapper->setNodeMask(Mask_Sky);
@@ -1636,7 +1637,7 @@ namespace MWRender
             }
 
             portal.rttNode = new PortalRTTNode(sceneResult.scene.get(), skyScene.get(), screenW, screenH, shouldAddMSAAIntermediateTarget());
-            if (portal.destIsExterior)
+            if (portal.destIsExterior || portal.destIsQuasiExterior)
                 portal.rttNode->setClearColor(mExteriorSkyColor);
             {
                 const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
@@ -1746,7 +1747,7 @@ namespace MWRender
 
         for (auto& portal : mPortals)
         {
-            if (!portal.destIsExterior || !portal.rttNode)
+            if ((!portal.destIsExterior && !portal.destIsQuasiExterior) || !portal.rttNode)
                 continue;
             portal.rttNode->setClearColor(mExteriorSkyColor);
 
