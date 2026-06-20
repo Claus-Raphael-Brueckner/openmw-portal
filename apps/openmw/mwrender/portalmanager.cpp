@@ -176,6 +176,40 @@ namespace MWRender
 			"in_s_doorjam_rounded.nif",
 			"in_s_doorway.nif",
         };
+
+        // Doors that must NOT be rendered as portals (hatches, ladders, grates, sewer drains).
+        // Matched as case-insensitive substrings against the door's model path.
+        static constexpr std::string_view sNonPortalModels[] = {
+            "ex_de_ship_trapdoor",
+            "ex_co_ship_trapdoor",
+            "in_v_s_trapdoor_01",
+            "velothi_sewer_door",
+            "ab_door_hlasewerdrain",
+            "ab_door_hlasewertrapdoor01",
+            "ab_door_hlasewertrapdoor02",
+            "ab_door_deshacktrapbot",
+            "ab_door_deshacktraptop",
+            "ab_door_deshipdoorlower",
+            "ab_door_dwrvscaffladder",
+            "ab_door_dwrvscaffladderbroke",
+            "ab_door_dwrvscaffladdertop",
+            "ab_door_impgalleonladder_ex",
+            "ab_door_impgrate",
+            "ab_impladdersmall",
+            "ab_door_impsmallhiddenfloor",
+            "ab_door_impsmallhiddenfloortrap",
+            "ab_door_imptraptop",
+            "ab_door_ropelong",
+            "ab_door_ropeshort",
+            "ex_mh_sewer_trapdoor_01",
+            "ex_mh_sewer_trapdoor_sadri",
+            "ex_mh_pav_gate_door",
+            "ex_mh_palace_gate",
+            "in_m_sewer_trapdoor_01",
+            "in_m_sewer_trapdoor_01_blkd",
+            "chargen_shipdoor",
+        };
+
         // 1×1 RGBA8 texture filled with a constant color.
         osg::ref_ptr<osg::Texture2D> makeSolidTexture(unsigned char r, unsigned char g, unsigned char b, unsigned char a)
         {
@@ -975,6 +1009,14 @@ namespace MWRender
         //     if (model.find(pattern) != std::string::npos)
         //         return true;
         // return false;
+
+        // Exclude hatches, ladders, grates and similar flat/non-door geometry.
+        std::string model = base->mModel;
+        Misc::StringUtils::lowerCaseInPlace(model);
+        for (const auto& pattern : sNonPortalModels)
+            if (model.find(pattern) != std::string::npos)
+                return false;
+
         return true;
     }
 
