@@ -222,13 +222,16 @@ namespace MWRender
             return tex;
         }
 
-        // Magenta wireframe group visualising the three portal collision shapes:
-        // one floor box and two guide-wall cylinders (Mask_Debug → main view only).
+        // Magenta wireframe group visualising the portal collision shapes:
+        // floor/ramp box, two edge cylinders, two wing boxes (Mask_Debug → main view only).
         [[maybe_unused]] osg::ref_ptr<osg::Group> buildPortalCollisionDebug(
             bool hasFloor, const osg::Vec3f& floorCenter, const osg::Quat& floorRot,
             float floorHalfX, float floorHalfY,
-            const osg::Vec3f& wallLeft, const osg::Vec3f& wallRight,
-            float wallRadius, float wallHalfH)
+            const osg::Vec3f& cylLeft, const osg::Vec3f& cylRight,
+            float cylRadius, float cylHalfH,
+            const osg::Vec3f& wingLeftCenter, const osg::Vec3f& wingRightCenter,
+            const osg::Quat& wingRot,
+            float wingHalfX, float wingHalfY, float wingHalfZ)
         {
             osg::ref_ptr<osg::Group> grp = new osg::Group;
             grp->setNodeMask(Mask_Debug);
@@ -240,30 +243,32 @@ namespace MWRender
             ss->setMode(GL_LIGHTING, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
 
             const osg::Vec4f magenta(1.f, 0.f, 1.f, 1.f);
-            auto addShape = [&](osg::Group* parent, osg::Shape* shape)
+            auto colorShape = [&](osg::Shape* shape) -> osg::ref_ptr<osg::Geode>
             {
                 osg::ref_ptr<osg::ShapeDrawable> sd = new osg::ShapeDrawable(shape);
                 sd->setColor(magenta);
-                osg::ref_ptr<osg::Geode> geode = new osg::Geode;
-                geode->addDrawable(sd);
-                parent->addChild(geode);
+                osg::ref_ptr<osg::Geode> g = new osg::Geode;
+                g->addDrawable(sd);
+                return g;
+            };
+            auto addBox = [&](osg::Group* parent, const osg::Vec3f& center, const osg::Quat& rot,
+                               float hx, float hy, float hz)
+            {
+                osg::ref_ptr<osg::MatrixTransform> mt = new osg::MatrixTransform;
+                osg::Matrix m; m.setRotate(rot); m.setTrans(center);
+                mt->setMatrix(m);
+                mt->addChild(colorShape(new osg::Box(osg::Vec3f(), hx*2.f, hy*2.f, hz*2.f)));
+                parent->addChild(mt);
             };
 
             if (hasFloor)
-            {
-                // Wrap floor box in a MatrixTransform so the ramp tilt is visualised correctly.
-                osg::ref_ptr<osg::MatrixTransform> mt = new osg::MatrixTransform;
-                osg::Matrix m;
-                m.setRotate(floorRot);
-                m.setTrans(floorCenter);
-                mt->setMatrix(m);
-                // Box origin is (0,0,0) in local space; full size = 2*half-extents, thickness 20
-                addShape(mt.get(), new osg::Box(osg::Vec3f(), floorHalfX * 2.f, floorHalfY * 2.f, 20.f));
-                grp->addChild(mt);
-            }
-            // btCylinderShapeZ half-extents (radius,radius,halfH) → full height = 2*halfH
-            addShape(grp.get(), new osg::Cylinder(wallLeft,  wallRadius, 2.f * wallHalfH));
-            addShape(grp.get(), new osg::Cylinder(wallRight, wallRadius, 2.f * wallHalfH));
+                addBox(grp.get(), floorCenter, floorRot, floorHalfX, floorHalfY, 10.f);
+
+            grp->addChild(colorShape(new osg::Cylinder(cylLeft,  cylRadius, 2.f * cylHalfH)));
+            grp->addChild(colorShape(new osg::Cylinder(cylRight, cylRadius, 2.f * cylHalfH)));
+
+            addBox(grp.get(), wingLeftCenter,  wingRot, wingHalfX, wingHalfY, wingHalfZ);
+            addBox(grp.get(), wingRightCenter, wingRot, wingHalfX, wingHalfY, wingHalfZ);
 
             return grp;
         }
@@ -731,6 +736,12 @@ namespace MWRender
                 {
                     if (!ref.mBase || ref.mBase->mModel.empty())
                         continue;
+                    {
+                        std::string m = ref.mBase->mModel;
+                        Misc::StringUtils::lowerCaseInPlace(m);
+                        if (m.find("marker") != std::string::npos)
+                            continue;
+                    }
                     if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef))
                         continue;
                     if (!ref.mData.isEnabled())
@@ -1504,6 +1515,11 @@ namespace MWRender
                 decorNif = "i/portal_in_hlaalu_door.nif";
                 decorUsesLocalOffset = false; // NIF origin matches door hinge, geometry already offset
             }
+			else if (model.find("ex_mh_temple_door_01") != std::string::npos)
+			{
+				decorNif = "x/portal_ex_mh_temple_door_01.nif";
+				decorUsesLocalOffset = true; 
+			}
             if (decorNif)
             {
                 const VFS::Path::Normalized decorPath = Misc::ResourceHelpers::correctMeshPath(
@@ -2004,15 +2020,25 @@ namespace MWRender
                     if (Settings::portal().mDebugGeometry)
                     {
                         constexpr float wallRadius = 45.f;
-                        const osg::Quat portalRot = portal.invRot.inverse();
-                        auto toWorld = [&](float localX) -> osg::Vec3f {
+                        constexpr float wingHalfX  = 200.f;
+                        constexpr float wingHalfY  = 100.f;
+                        const float     wingHalfZ  = portal.halfExtents.y() + 100.f;
+                        const osg::Quat portalRot  = portal.invRot.inverse();
+                        // Cylinders sit at Y=0 (portal face); wings sit at -Y (toward player).
+                        auto atFace = [&](float localX) -> osg::Vec3f {
                             return portal.planePoint + portalRot * osg::Vec3f(localX, 0.f, 0.f);
+                        };
+                        auto atWing = [&](float localX) -> osg::Vec3f {
+                            return portal.planePoint + portalRot * osg::Vec3f(localX, -wingHalfY, 0.f);
                         };
                         mDebugShapesNode = buildPortalCollisionDebug(
                             hasRamp, rampCenter, rampRot, halfRampWidth, halfRampLen,
-                            toWorld(-(portal.halfExtents.x() + wallRadius)),
-                            toWorld( (portal.halfExtents.x() + wallRadius)),
-                            wallRadius, portal.halfExtents.y());
+                            atFace(-(portal.halfExtents.x() + wallRadius)),
+                            atFace( (portal.halfExtents.x() + wallRadius)),
+                            wallRadius, portal.halfExtents.y(),
+                            atWing(-(portal.halfExtents.x() + wingHalfX)),
+                            atWing( (portal.halfExtents.x() + wingHalfX)),
+                            portalRot, wingHalfX, wingHalfY, wingHalfZ);
                         mRttParent->addChild(mDebugShapesNode);
                     }
                 }

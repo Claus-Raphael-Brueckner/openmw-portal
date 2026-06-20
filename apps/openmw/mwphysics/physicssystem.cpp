@@ -652,62 +652,71 @@ namespace MWPhysics
     {
         removePortalGuideWalls();
 
-        // Vertical cylinder standing at each portal edge.
-        // btCylinderShapeZ: axis = Z, half-extents = (radius, radius, halfHeight).
-        // Rotationally symmetric → no rotation needed, deflects from any approach angle.
-        const float radius = 45.f;
-        mPortalWallShape = std::make_unique<btCylinderShapeZ>(btVector3(radius, radius, halfHeight));
-
         const btQuaternion portalQ(
             static_cast<btScalar>(portalRot.x()),
             static_cast<btScalar>(portalRot.y()),
             static_cast<btScalar>(portalRot.z()),
             static_cast<btScalar>(portalRot.w()));
         const btVector3 origin(planePoint.x(), planePoint.y(), planePoint.z());
+        const btTransform portalTr(portalQ, btVector3(0, 0, 0));
 
-        // Center the cylinders on the portal plane (Y=0 in local portal space),
-        // aligned with the lower portal vertices.
-        const btScalar yOffset = 0.f;
+        // ── Cylinders at the portal edges (original behaviour) ──────────────────
+        // Rotationally symmetric → deflect the player into the opening from any angle.
+        const float radius = 45.f;
+        mPortalWallShape = std::make_unique<btCylinderShapeZ>(btVector3(radius, radius, halfHeight));
 
-        // Transform a local-space offset through the portal rotation into world space.
-        auto toWorld = [&](float localX) -> btVector3
-        {
-            const btTransform portalTr(portalQ, btVector3(0, 0, 0));
-            return portalTr * btVector3(localX, yOffset, 0.f) + origin;
-        };
-
-        auto makeWall = [&](float localX) -> std::unique_ptr<btCollisionObject>
+        auto makeCylinder = [&](float localX) -> std::unique_ptr<btCollisionObject>
         {
             auto obj = std::make_unique<btCollisionObject>();
             obj->setCollisionShape(mPortalWallShape.get());
             btTransform tr;
             tr.setIdentity();
-            tr.setOrigin(toWorld(localX));
+            tr.setOrigin(portalTr * btVector3(localX, 0.f, 0.f) + origin);
             obj->setWorldTransform(tr);
-            mTaskScheduler->addCollisionObject(
-                obj.get(), CollisionType_PortalGuide, CollisionType_Actor);
+            mTaskScheduler->addCollisionObject(obj.get(), CollisionType_PortalGuide, CollisionType_Actor);
             return obj;
         };
+        mPortalWallLeft  = makeCylinder(-(halfWidth + radius));
+        mPortalWallRight = makeCylinder( (halfWidth + radius));
 
-        // Place cylinder centers at ±(halfWidth + radius) so the inner surface of each
-        // cylinder is flush with the portal edge at ±halfWidth — no intrusion into the opening.
-        mPortalWallLeft  = makeWall(-(halfWidth + radius));
-        mPortalWallRight = makeWall( (halfWidth + radius));
+        // ── Wing boxes extending into the approach zone ──────────────────────────
+        // The cylinders guard the portal face (Y = 0) but don't extend toward the
+        // player.  When ghost mode strips side-wall collision the player can walk
+        // sideways through the stripped wall from anywhere in the 180-unit approach
+        // zone.  Wing boxes fill that gap: each box sits flush against the portal
+        // edge and reaches 200 units outward plus 200 units forward (> kApproachDist).
+        //
+        // Portal local axes:  X = width,  -Y = toward player,  Z = up.
+        constexpr float wingHalfX = 200.f;   // outward extent from portal edge
+        constexpr float wingHalfY = 100.f;   // half-depth toward player (200 u total)
+        const float     wingHalfZ = halfHeight + 100.f;
+
+        mPortalWingShape = std::make_unique<btBoxShape>(btVector3(wingHalfX, wingHalfY, wingHalfZ));
+
+        auto makeWing = [&](float localX) -> std::unique_ptr<btCollisionObject>
+        {
+            auto obj = std::make_unique<btCollisionObject>();
+            obj->setCollisionShape(mPortalWingShape.get());
+            btTransform tr;
+            tr.setRotation(portalQ);
+            tr.setOrigin(portalTr * btVector3(localX, -wingHalfY, 0.f) + origin);
+            obj->setWorldTransform(tr);
+            mTaskScheduler->addCollisionObject(obj.get(), CollisionType_PortalGuide, CollisionType_Actor);
+            return obj;
+        };
+        mPortalWingLeft  = makeWing(-(halfWidth + wingHalfX));
+        mPortalWingRight = makeWing( (halfWidth + wingHalfX));
     }
 
     void PhysicsSystem::removePortalGuideWalls()
     {
-        if (mPortalWallLeft)
-        {
-            mTaskScheduler->removeCollisionObject(mPortalWallLeft.get());
-            mPortalWallLeft.reset();
-        }
-        if (mPortalWallRight)
-        {
-            mTaskScheduler->removeCollisionObject(mPortalWallRight.get());
-            mPortalWallRight.reset();
-        }
+        if (mPortalWallLeft)  { mTaskScheduler->removeCollisionObject(mPortalWallLeft.get());  mPortalWallLeft.reset(); }
+        if (mPortalWallRight) { mTaskScheduler->removeCollisionObject(mPortalWallRight.get()); mPortalWallRight.reset(); }
         mPortalWallShape.reset();
+
+        if (mPortalWingLeft)  { mTaskScheduler->removeCollisionObject(mPortalWingLeft.get());  mPortalWingLeft.reset(); }
+        if (mPortalWingRight) { mTaskScheduler->removeCollisionObject(mPortalWingRight.get()); mPortalWingRight.reset(); }
+        mPortalWingShape.reset();
     }
 
     bool PhysicsSystem::toggleCollisionMode()
