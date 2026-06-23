@@ -980,7 +980,7 @@ namespace MWRender
             // Water is NOT added here — caller creates reflection/refraction RTTs first,
             // then calls createPortalWaterNode() and adds it to the returned lightManager.
             float waterHeight = 0.f;
-            if (isExterior && cellStore->getCell()->hasWater())
+            if (cellStore->getCell()->hasWater())
                 waterHeight = cellStore->getCell()->getWaterHeight();
 
             return PortalSceneResult{ lightManager, light, lightModel, sceneFogOut, waterHeight };
@@ -1593,7 +1593,7 @@ namespace MWRender
                 mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, sceneMaxDist, mExteriorSkyColor);
 
 
-            const bool hasWater = portal.destIsExterior && destCellStore && destCellStore->getCell()->hasWater();
+            const bool hasWater = destCellStore && destCellStore->getCell()->hasWater();
 
             if (hasWater && mRttParent)
             {
