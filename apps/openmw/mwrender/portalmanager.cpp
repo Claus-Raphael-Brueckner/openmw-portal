@@ -36,6 +36,8 @@
 
 #include <osg/NodeCallback>
 #include <osgUtil/CullVisitor>
+#include <osgUtil/IntersectionVisitor>
+#include <osgUtil/LineSegmentIntersector>
 #include <components/sceneutil/lightcontroller.hpp>
 
 #include <components/esm3/loadacti.hpp>
@@ -1482,8 +1484,6 @@ namespace MWRender
                   || model.find("hlaalu_loaddoor") != std::string::npos)
                 portal.clipBias = -10.0f;
 
-            if (isForwardPortal)
-                portal.clipBias = 10.f; // clear entrance frame geometry at destination door
 
             if (model.find("ex_imp_loaddoor_02") != std::string::npos
              || model.find("in_impsmall_loaddoor_01") != std::string::npos
@@ -1690,10 +1690,31 @@ namespace MWRender
                 portal.rttNode->setClearColor(mExteriorSkyColor);
             {
                 const osg::Vec3f destFwd = portal.destDoorRot * osg::Vec3f(0.f, -1.f, 0.f);
-                // Only push the clip plane forward for door types that place flat wall geometry
-                // (e.g. in_c_wall_plain) flush at the destination door (ex_common_door_01 /
-                // in_c_door_wood_square). Other door types get the clip plane right at the door
-                // to avoid a visible gap at the portal edge.
+
+                // Auto-detect blocking geometry near the portal opening. Cast a centre ray
+                // from just inside the destination door into the room; if it hits something
+                // within kSearchDist units the portal entrance is obstructed and the clip
+                // plane is pushed past the obstacle. Hits within kIgnoreNear are assumed to
+                // be the door frame mesh itself and are skipped.
+                if (!portal.destIsQuasiExterior)
+                {
+                    constexpr float kEpsilon    = 1.f;   // avoid fp issues at the clip plane
+                    constexpr float kSearchDist = 100.f;
+                    constexpr float kMargin     = 5.f;
+                    osg::ref_ptr<osgUtil::LineSegmentIntersector> intersector
+                        = new osgUtil::LineSegmentIntersector(
+                            osg::Vec3d(portal.destDoorPos + destFwd * kEpsilon),
+                            osg::Vec3d(portal.destDoorPos + destFwd * (kEpsilon + kSearchDist)));
+                    osgUtil::IntersectionVisitor iv(intersector);
+                    sceneResult.scene->accept(iv);
+                    if (intersector->containsIntersections())
+                    {
+                        const osg::Vec3f hit(intersector->getFirstIntersection().getWorldIntersectPoint());
+                        const float dist = (hit - portal.destDoorPos) * destFwd;
+                        portal.clipBias = std::max(portal.clipBias, dist + kMargin);
+                    }
+                }
+
                 portal.rttNode->setClipPlaneBoundary(destFwd, portal.destDoorPos + destFwd * portal.clipBias);
             }
             // Quasi-exterior cells (Mournhold) are self-contained — only their own statics are
