@@ -207,6 +207,8 @@ namespace MWRender
             "in_m_sewer_trapdoor_01_blkd",
             "chargen_shipdoor",
 			"ex_mh_pav_gate_door",
+			"ex_h_trapdoor_01",
+			"in_mh_trapdoor_01",
         };
 
         // 1×1 RGBA8 texture filled with a constant color.
@@ -1489,7 +1491,8 @@ namespace MWRender
              || model.find("ex_s_door_rounded") != std::string::npos
              || model.find("in_s_doorjam_rounded") != std::string::npos
              || model.find("ex_mh_door_02") != std::string::npos
-             || model.find("ex_mh_door_01") != std::string::npos)
+             || model.find("ex_mh_door_01") != std::string::npos
+			 || model.find("ex_vivec_grate_01") != std::string::npos)	
             {
                 osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
                 mss->getUniform("portalMaskType")->set(1);
@@ -1510,6 +1513,13 @@ namespace MWRender
                 mss->getUniform("portalMaskType")->set(3);
                 mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
             }
+			else if (model.find("in_velothismall_ndoor_01") != std::string::npos)
+			{
+                osg::ref_ptr<osg::StateSet> mss = quadNode->getOrCreateStateSet();
+                mss->getUniform("portalMaskType")->set(4);
+                mss->getUniform("portalAspect")->set(halfExtents.y() / halfExtents.x());
+
+			}
         }
 
         // Decorative meshes placed alongside specific portal quads.
@@ -1528,6 +1538,11 @@ namespace MWRender
                 decorNif = "i/portal_in_hlaalu_door.nif";
                 decorUsesLocalOffset = false; // NIF origin matches door hinge, geometry already offset
             }
+			else if (model.find("in_t_housepod_door_exit.nif") != std::string::npos)
+			{
+				decorNif = "x/ex_t_doorway_02.nif";
+				decorUsesLocalOffset = true;
+			}
 			else if (model.find("ex_mh_temple_door_01") != std::string::npos)
 			{
 				decorNif = "x/portal_ex_mh_temple_door_01.nif";
@@ -1994,10 +2009,10 @@ namespace MWRender
                     {
                         hasRamp       = true;
                         halfRampWidth = portal.halfExtents.x() + 30.f;
-                        halfRampLen   = 60.f;
+                        halfRampLen   = 120.f;
                         rampRot       = portalRot;
                         rampCenter    = portal.planePoint
-                            + portalRot * osg::Vec3f(0.f, -halfRampLen,
+                            + portalRot * osg::Vec3f(0.f, 0.f,
                                                      -(portal.halfExtents.y() + 5.f));
                         world->addPortalFloor(rampCenter, halfRampWidth, halfRampLen, rampRot);
                     }

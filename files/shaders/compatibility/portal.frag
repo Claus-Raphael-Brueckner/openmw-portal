@@ -43,6 +43,33 @@ void main()
         float dv = v_texCoord.y - yc;
         if (du * du + dv * dv * portalAspect * portalAspect > 0.25) discard;
     }
+	else if (portalMaskType == 4)
+    {
+        // Abgerundete obere Ecken. Radius = Breite / 4 (0.25 in UV-Koordinaten).
+        float r = 0.25;
+        // yc ist die y-Koordinate, ab der die obere Rundung beginnt.
+        float yc = 1.0 - r / portalAspect;
+
+        if (v_texCoord.y > yc)
+        {
+            if (v_texCoord.x < r)
+            {
+                // Test für Kreis oben links
+                float du = v_texCoord.x - r;
+                float dv = v_texCoord.y - yc;
+                if (du * du + dv * dv * portalAspect * portalAspect > r * r) discard;
+            }
+            else if (v_texCoord.x > 1.0 - r)
+            {
+                // Test für Kreis oben rechts
+                float du = v_texCoord.x - (1.0 - r);
+                float dv = v_texCoord.y - yc;
+                if (du * du + dv * dv * portalAspect * portalAspect > r * r) discard;
+            }
+            // Pixel im mittleren oberen Bereich (Rect 1) passieren hier automatisch.
+        }
+        // Pixel im unteren Bereich (Rect 2, y <= yc) passieren ebenfalls automatisch.
+    }
 
     vec2 uv = v_clipPos.xy / v_clipPos.w * 0.5 + 0.5;
     gl_FragData[0] = texture2D(portalTex, uv);
