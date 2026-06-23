@@ -9,6 +9,7 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 #include <components/debug/debuglog.hpp>
 
@@ -89,7 +90,7 @@ namespace MWRender
 {
     namespace
     {
-        static constexpr std::string_view sPortalModels[] = {
+        static const std::unordered_set<std::string_view> sPortalModels = {
             "ex_cave_door_01.nif",
             "in_cave_door_01.nif",
             "ex_nord_door_01.nif",
@@ -1015,10 +1016,11 @@ namespace MWRender
             return false;
         std::string model = base->mModel;
         Misc::StringUtils::lowerCaseInPlace(model);
-        for (const auto& pattern : sPortalModels)
-            if (model.find(pattern) != std::string::npos)
-                return true;
-        return false;
+        const auto slash = model.find_last_of("/\\");
+        const std::string_view filename = (slash != std::string::npos)
+            ? std::string_view(model).substr(slash + 1)
+            : std::string_view(model);
+        return sPortalModels.count(filename) > 0;
     }
 
     osg::Vec2f PortalManager::computeHalfExtents(
