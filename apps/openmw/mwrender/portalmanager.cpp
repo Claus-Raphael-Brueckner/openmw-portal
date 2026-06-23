@@ -1898,7 +1898,7 @@ namespace MWRender
                     ? std::min(rawDepth, -10.f)
                     : std::max(rawDepth,  10.f);
                 const osg::Vec3f camPos = portal.destDoorPos + rawOffset
-                    + destFwd * (clampedDepth - rawDepth);
+                    + destFwd * (clampedDepth - rawDepth + portal.clipBias);
 
                 const osg::Vec3f rttLook = portalRot * playerLook;
                 // Map player up through the portal so camera roll is physically consistent.
