@@ -1227,7 +1227,6 @@ namespace MWRender
 
         // modelCenter is already the filtered (cx, 0, cz) offset from computeHalfExtents.
         const osg::Quat cellRefRot = Misc::Convert::makeOsgQuat(door.getCellRef().getPosition());
-        bool isForwardPortal = false; // set below; used again in the clipBias block
         osg::Vec3f localOffset = modelCenter;
         {
             std::string model = door.get<ESM::Door>()->mBase->mModel;
@@ -1257,29 +1256,6 @@ namespace MWRender
                     });
                 }
 
-                // Forward cells: per-destination-cell quad shift for specific interior cells
-                // where the portal still needs additional adjustment (e.g. sits behind a wall).
-                const ESM::RefId destCell = door.getCellRef().getDestCell();
-                std::string_view listView = Settings::portal().mForwardCells.get();
-                while (!listView.empty())
-                {
-                    auto sep = listView.find(';');
-                    std::string_view entry = (sep != std::string_view::npos)
-                        ? listView.substr(0, sep) : listView;
-                    while (!entry.empty() && (entry.front() == ' ' || entry.front() == '\t'))
-                        entry.remove_prefix(1);
-                    while (!entry.empty() && (entry.back() == ' ' || entry.back() == '\t'))
-                        entry.remove_suffix(1);
-                    if (!entry.empty() && destCell == entry)
-                    {
-                        isForwardPortal = true;
-                        break;
-                    }
-                    if (sep == std::string_view::npos) break;
-                    listView.remove_prefix(sep + 1);
-                }
-                if (isForwardPortal)
-                    localOffset.y() += Settings::portal().mForwardOffset.get();
             }
         }
         osg::ref_ptr<osg::MatrixTransform> quadNode = buildQuadNode(halfExtents, nifRootQuat, localOffset);
