@@ -1956,7 +1956,7 @@ namespace MWRender
             if (portal.cooldown > 0)
             {
                 --portal.cooldown;
-                const float d = (eyePos - portal.planePoint) * portal.planeNormal;
+                const float d = (playerPos - portal.planePoint) * portal.planeNormal;
                 portal.lastSide = (d >= 0.f);
                 continue;
             }
@@ -1965,14 +1965,14 @@ namespace MWRender
             // An inactive portal (NodeMask = 0, no RTT) must not teleport the player silently.
             if (!portal.rttNode)
             {
-                const float d = (eyePos - portal.planePoint) * portal.planeNormal;
+                const float d = (playerPos - portal.planePoint) * portal.planeNormal;
                 portal.lastSide = (d >= 0.f);
                 continue;
             }
 
-            // Use camera (eye) position for crossing so the trigger fires when the player's
-            // view crosses the plane — the natural "walked through" moment.
-            const float dist = (eyePos - portal.planePoint) * portal.planeNormal;
+            // Use the player's body position (not the camera) for crossing detection so that
+            // traversal works correctly in both first-person and third-person view.
+            const float dist = (playerPos - portal.planePoint) * portal.planeNormal;
             const bool side = (dist >= 0.f);
 
             // --- Approach ghost mode ---
@@ -1982,7 +1982,7 @@ namespace MWRender
             constexpr float kApproachDist = 80.f;
             const bool inApproachZone = !portal.noCollision
                 && portal.lastSide && dist >= 0.f && dist < kApproachDist
-                && isWithinBounds(eyePos, portal);
+                && isWithinBounds(playerPos, portal);
 
             // Check whether any OTHER portal already owns the ghost-mode physics objects.
             // The floor/walls are a single shared physics resource; only one portal at a time
@@ -2103,7 +2103,7 @@ namespace MWRender
             }
 
             // Trigger only when crossing from outside (lastSide=true) to inside.
-            if (portal.lastSide && !side && isWithinBounds(eyePos, portal))
+            if (portal.lastSide && !side && isWithinBounds(playerPos, portal))
             {
                 // --- Rapid-crossing diagnostics ---
                 const double nowMs = std::chrono::duration<double, std::milli>(
@@ -2120,9 +2120,9 @@ namespace MWRender
                     for (size_t j = 0; j < mPortals.size(); ++j)
                     {
                         const auto& p = mPortals[j];
-                        const float pd = (eyePos - p.planePoint) * p.planeNormal;
+                        const float pd = (playerPos - p.planePoint) * p.planeNormal;
                         const bool pInZone = !p.noCollision && p.lastSide
-                            && pd >= 0.f && pd < kApproachDist && isWithinBounds(eyePos, p);
+                            && pd >= 0.f && pd < kApproachDist && isWithinBounds(playerPos, p);
                         Log(Debug::Warning) << "  [p" << j << "]"
                             << " dest=" << p.destCellId.toDebugString()
                             << " approachActive=" << p.approachActive
