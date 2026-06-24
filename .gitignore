@@ -40,6 +40,9 @@ resources
 /*.desktop
 /*.install
 
+## AppImage
+/*.AppImage
+
 ## binaries
 /esmtool
 /openmw

@@ -71,6 +71,13 @@ namespace Files
 
     std::filesystem::path LinuxPath::getGlobalConfigPath() const
     {
+        const char* appdir = getenv("APPDIR");
+        if (appdir != nullptr)
+        {
+            auto p = std::filesystem::path(appdir) / "usr/etc" / mName;
+            if (std::filesystem::exists(p))
+                return p;
+        }
         std::filesystem::path globalPath(GLOBAL_CONFIG_PATH);
         return globalPath / mName;
     }
