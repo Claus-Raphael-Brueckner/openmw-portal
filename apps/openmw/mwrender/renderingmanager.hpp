@@ -15,6 +15,7 @@
 
 #include <deque>
 #include <memory>
+#include <filesystem>
 #include <span>
 #include <unordered_map>
 
@@ -167,6 +168,7 @@ namespace MWRender
 
         /// Returns true if ptr is a portal door (physics should not be added for it).
         bool isPortalDoor(const MWWorld::Ptr& ptr) const;
+        void loadPortalModelList(const std::filesystem::path& userDataPath);
 
         struct PortalStateChange
         {

@@ -1,6 +1,9 @@
 #ifndef OPENMW_MWRENDER_PORTALMANAGER_H
 #define OPENMW_MWRENDER_PORTALMANAGER_H
 
+#include <filesystem>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <osg/Fog>
@@ -92,6 +95,10 @@ namespace MWRender
         /// Returns true if ptr is a door whose model is handled as a portal surface.
         bool isPortalDoor(const MWWorld::Ptr& door) const;
 
+        /// Load the portal model whitelist from userDataPath/portal_models.txt.
+        /// If the file does not exist, built-in defaults are used instead.
+        void loadModelList(const std::filesystem::path& userDataPath);
+
     private:
         struct Portal
         {
@@ -140,6 +147,7 @@ namespace MWRender
         static constexpr float kStreamRange    = 1600.f; // ~25 m, always active
         static constexpr float kStreamRangeFar = 3200.f; // ~50 m, active when portal is in viewport
 
+        std::unordered_set<std::string> mPortalModels;
         std::vector<Portal> mPortals;
         bool mGhostModeActive = false; ///< true while any portal has approachActive
         Resource::ResourceSystem* mResourceSystem;

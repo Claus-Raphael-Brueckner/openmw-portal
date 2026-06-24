@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -90,7 +91,7 @@ namespace MWRender
 {
     namespace
     {
-        static const std::unordered_set<std::string_view> sPortalModels = {
+        static const std::initializer_list<std::string_view> sDefaultPortalModels = {
             "ex_cave_door_01.nif",
             "in_cave_door_01.nif",
             "ex_nord_door_01.nif",
@@ -103,97 +104,97 @@ namespace MWRender
             "ex_common_door_01.nif",
             "ex_common_door_balcony.nif",
             "in_c_door_wood_square.nif",
-			"ex_ashl_door_01.nif",
-			"ex_ashl_door_02.nif",
-			"in_ashl_door_01.nif",
-			"in_ashl_door_02.nif",
-			"ex_imp_loaddoor_03.nif",
-			"in_impsmall_loaddoor_01.nif",
-			"ex_imp_loaddoor_02.nif",
-			"in_ar_door_01.nif",
-			"ex_redoran_barracks_door.nif",
-			"in_redoran_barracks_door.nif",
-			"in_r_s_door_01.nif",
-			"in_redoran_hut_door_01.nif",
-			"ex_redoran_hut_01_a.nif",
-			"in_de_shack_door.nif",
-			"ex_de_shack_door.nif",
-			"ex_t_door_01.nif",
-			"ex_t_door_02.nif",
-			"in_t_housepod_door_exit.nif",
-			"in_t_s_plain_door.nif",
-			"ex_colony_door01.nif",
-			"ex_colony_door01_1b.nif",
-			"ex_colony_door02.nif",
-			"ex_colony_door02_1.nif",
-			"ex_colony_door02_2.nif",
-			"ex_colony_door02b_2.nif",
-			"ex_colony_door03.nif",
-			"ex_colony_door03 int.nif",
-			"ex_colony_door03_1.nif",
-			"ex_colony_door03_1_uryn.nif",
-			"ex_colony_door03_2.nif",
-			"ex_colony_door03_4.nif",
-			"ex_colony_door03_4a.nif",
-			"ex_colony_door03_int.nif",
-			"ex_colony_door04.nif",
-			"ex_colony_door04_1.nif",
-			"ex_colony_door04_2.nif",
-			"ex_colony_door04_2b.nif",
-			"ex_colony_door04_3.nif",
-			"ex_colony_door04b_3.nif",
-			"ex_colony_door04c_3.nif",
-			"ex_colony_door05.nif",
-			"ex_colony_door05_2.nif",
-			"ex_colony_door05_3.nif",
-			"ex_colony_door05_int.nif",
-			"ex_colony_door05_int_a.nif",
-			"ex_colony_door05_int_b.nif",
-			"ex_colony_door05_int_c.nif",
-			"ex_colony_door05a_4.nif",
-			"ex_colony_door05b_4.nif",
-			"ex_colony_door05c_4.nif",
-			"ex_colony_door06.nif",
-			"ex_colony_door07.nif",
-			"ex_colony_door08.nif",
-			"ex_colony_bardoor.nif",
-			"ex_colony_minedoor.nif",
-			"bm_ic_door_01.nif",
-			"bm_ic_door_pelt.nif",
-			"bm_ic_door_pelt_dark.nif",
-			"bm_ic_door_pelt_wolf.nif",
-			"ex_bm_tomb_door_01.nif",
-			"ex_bm_tomb_door_02.nif",
-			"ex_bm_tomb_door_03.nif",
-			"ex_bm_tomb_door_skaalara.nif",
-			"ex_s_door.nif",
-			"ex_s_door_double.nif",
-			"ex_s_door_double_gh.nif",
-			"ex_s_door_double_fixed.nif",
-			"ex_s_door_double_fixing.nif",
-			"ex_s_door_rigmor.nif",
-			"ex_s_door_rigmor2.nif",
-			"ex_s_door_rounded.nif",
-			"in_s_door.nif",
-			"in_s_doorjam.nif",
-			"in_s_doorjam_rounded.nif",
-			"in_s_doorway.nif",
-			"in_m_sewer_door_01.nif",
-			"ex_mh_palace_gate.nif",
-			"ex_mh_temple_door_01.nif",
-			"in_mh_door_01.nif",
-			"in_mh_door_01_nerev.nif",
-			"in_mh_door_01_velas.nif",
-			"in_mh_door_02.nif",
-			"in_mh_door_02_bar1_uni.nif",
-			"in_mh_door_02_bar2_uni.nif",
-			"in_mh_door_02_bar3_uni.nif",
-			"in_mh_door_02_bar4_uni.nif",
-			"in_mh_door_02_chapel.nif",
-			"in_mh_door_02_hels_uni.nif",
-			"in_mh_door_02_play.nif",
-			"in_mh_door_02_throne1.nif",
-			"in_mh_door_02_throne2.nif",
+            "ex_ashl_door_01.nif",
+            "ex_ashl_door_02.nif",
+            "in_ashl_door_01.nif",
+            "in_ashl_door_02.nif",
+            "ex_imp_loaddoor_03.nif",
+            "in_impsmall_loaddoor_01.nif",
+            "ex_imp_loaddoor_02.nif",
+            "in_ar_door_01.nif",
+            "ex_redoran_barracks_door.nif",
+            "in_redoran_barracks_door.nif",
+            "in_r_s_door_01.nif",
+            "in_redoran_hut_door_01.nif",
+            "ex_redoran_hut_01_a.nif",
+            "in_de_shack_door.nif",
+            "ex_de_shack_door.nif",
+            "ex_t_door_01.nif",
+            "ex_t_door_02.nif",
+            "in_t_housepod_door_exit.nif",
+            "in_t_s_plain_door.nif",
+            "ex_colony_door01.nif",
+            "ex_colony_door01_1b.nif",
+            "ex_colony_door02.nif",
+            "ex_colony_door02_1.nif",
+            "ex_colony_door02_2.nif",
+            "ex_colony_door02b_2.nif",
+            "ex_colony_door03.nif",
+            "ex_colony_door03 int.nif",
+            "ex_colony_door03_1.nif",
+            "ex_colony_door03_1_uryn.nif",
+            "ex_colony_door03_2.nif",
+            "ex_colony_door03_4.nif",
+            "ex_colony_door03_4a.nif",
+            "ex_colony_door03_int.nif",
+            "ex_colony_door04.nif",
+            "ex_colony_door04_1.nif",
+            "ex_colony_door04_2.nif",
+            "ex_colony_door04_2b.nif",
+            "ex_colony_door04_3.nif",
+            "ex_colony_door04b_3.nif",
+            "ex_colony_door04c_3.nif",
+            "ex_colony_door05.nif",
+            "ex_colony_door05_2.nif",
+            "ex_colony_door05_3.nif",
+            "ex_colony_door05_int.nif",
+            "ex_colony_door05_int_a.nif",
+            "ex_colony_door05_int_b.nif",
+            "ex_colony_door05_int_c.nif",
+            "ex_colony_door05a_4.nif",
+            "ex_colony_door05b_4.nif",
+            "ex_colony_door05c_4.nif",
+            "ex_colony_door06.nif",
+            "ex_colony_door07.nif",
+            "ex_colony_door08.nif",
+            "ex_colony_bardoor.nif",
+            "ex_colony_minedoor.nif",
+            "bm_ic_door_01.nif",
+            "bm_ic_door_pelt.nif",
+            "bm_ic_door_pelt_dark.nif",
+            "bm_ic_door_pelt_wolf.nif",
+            "ex_bm_tomb_door_01.nif",
+            "ex_bm_tomb_door_02.nif",
+            "ex_bm_tomb_door_03.nif",
+            "ex_bm_tomb_door_skaalara.nif",
+            "ex_s_door.nif",
+            "ex_s_door_double.nif",
+            "ex_s_door_double_gh.nif",
+            "ex_s_door_double_fixed.nif",
+            "ex_s_door_double_fixing.nif",
+            "ex_s_door_rigmor.nif",
+            "ex_s_door_rigmor2.nif",
+            "ex_s_door_rounded.nif",
+            "in_s_door.nif",
+            "in_s_doorjam.nif",
+            "in_s_doorjam_rounded.nif",
+            "in_s_doorway.nif",
+            "in_m_sewer_door_01.nif",
+            "ex_mh_palace_gate.nif",
+            "ex_mh_temple_door_01.nif",
+            "in_mh_door_01.nif",
+            "in_mh_door_01_nerev.nif",
+            "in_mh_door_01_velas.nif",
+            "in_mh_door_02.nif",
+            "in_mh_door_02_bar1_uni.nif",
+            "in_mh_door_02_bar2_uni.nif",
+            "in_mh_door_02_bar3_uni.nif",
+            "in_mh_door_02_bar4_uni.nif",
+            "in_mh_door_02_chapel.nif",
+            "in_mh_door_02_hels_uni.nif",
+            "in_mh_door_02_play.nif",
+            "in_mh_door_02_throne1.nif",
+            "in_mh_door_02_throne2.nif",
         };
 
 
@@ -703,6 +704,7 @@ namespace MWRender
             MWWorld::CellStore* cellStore,
             Resource::ResourceSystem* resourceSystem,
             const osg::Vec3f& destCenter,
+            const std::unordered_set<std::string>& portalModels,
             float maxDist = 5000.f)
         {
             osg::ref_ptr<osg::Group> group = new osg::Group;
@@ -768,7 +770,7 @@ namespace MWRender
                     std::string m = ref.mBase->mModel;
                     Misc::StringUtils::lowerCaseInPlace(m);
                     bool known = false;
-                    for (const auto& p : sPortalModels)
+                    for (const auto& p : portalModels)
                         if (m.find(p) != std::string::npos) { known = true; break; }
                     if (!known) continue;
                 }
@@ -825,9 +827,10 @@ namespace MWRender
             const osg::Vec4f& diffuse,
             const osg::Vec3f& sunDir,
             float maxDist,
+            const std::unordered_set<std::string>& portalModels,
             const osg::Vec4f& skyColor = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f))
         {
-            osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, maxDist);
+            osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, portalModels, maxDist);
             // One LightListCallback on the whole group with an explicit large bound so it always
             // intersects with any light in the scene. Individual PAT bounds may be invalid before
             // the first render, causing per-PAT callbacks to silently skip all lights.
@@ -996,6 +999,40 @@ namespace MWRender
 
     PortalManager::~PortalManager() = default;
 
+    void PortalManager::loadModelList(const std::filesystem::path& userDataPath)
+    {
+        const std::filesystem::path filePath = userDataPath / "portal_models.txt";
+        std::ifstream file(filePath);
+        if (file.is_open())
+        {
+            Log(Debug::Info) << "Portal: loading model list from " << filePath;
+            std::string line;
+            while (std::getline(file, line))
+            {
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                Misc::StringUtils::lowerCaseInPlace(line);
+                if (!line.empty())
+                    mPortalModels.insert(std::move(line));
+            }
+            Log(Debug::Info) << "Portal: loaded " << mPortalModels.size() << " model(s)";
+        }
+        else
+        {
+            mPortalModels = std::unordered_set<std::string>(
+                sDefaultPortalModels.begin(), sDefaultPortalModels.end());
+            std::ofstream out(filePath);
+            if (out.is_open())
+            {
+                for (const auto& name : sDefaultPortalModels)
+                    out << name << '\n';
+                Log(Debug::Info) << "Portal: wrote default model list to " << filePath;
+            }
+            else
+                Log(Debug::Warning) << "Portal: could not write default model list to " << filePath;
+        }
+    }
+
     void PortalManager::setExteriorLighting(const osg::Vec4f& ambient, const osg::Vec4f& diffuse, const osg::Vec3f& sunDir)
     {
         mExteriorAmbient = ambient;
@@ -1020,7 +1057,7 @@ namespace MWRender
         const std::string_view filename = (slash != std::string::npos)
             ? std::string_view(model).substr(slash + 1)
             : std::string_view(model);
-        return sPortalModels.count(filename) > 0;
+        return mPortalModels.count(std::string(filename)) > 0;
     }
 
     osg::Vec2f PortalManager::computeHalfExtents(
@@ -1590,7 +1627,7 @@ namespace MWRender
             PortalSceneResult sceneResult = buildPortalScene(
                 destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode,
                 mSkyManager, osg::Vec2f(float(screenW), float(screenH)),
-                mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, sceneMaxDist, mExteriorSkyColor);
+                mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, sceneMaxDist, mPortalModels, mExteriorSkyColor);
 
 
             const bool hasWater = destCellStore && destCellStore->getCell()->hasWater();

@@ -1,6 +1,7 @@
 #include "renderingmanager.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 #include <limits>
 
 #include <osg/ClipControl>
@@ -803,6 +804,12 @@ namespace MWRender
     bool RenderingManager::isPortalDoor(const MWWorld::Ptr& ptr) const
     {
         return mPortalManager && mPortalManager->isPortalDoor(ptr);
+    }
+
+    void RenderingManager::loadPortalModelList(const std::filesystem::path& userDataPath)
+    {
+        if (mPortalManager)
+            mPortalManager->loadModelList(userDataPath);
     }
 
     RenderingManager::PortalStateChange RenderingManager::notifyDoorLockChanged(const MWWorld::Ptr& ptr)
