@@ -123,6 +123,7 @@ namespace MWRender
             "ex_t_door_02.nif",
             "in_t_housepod_door_exit.nif",
             "in_t_s_plain_door.nif",
+			"ex_v_cantondoor_01.nif",
             "ex_colony_door01.nif",
             "ex_colony_door01_1b.nif",
             "ex_colony_door02.nif",
@@ -1332,6 +1333,19 @@ namespace MWRender
                             continue;
                         if (ref.mRef.getDestCell() != sourceCellId)
                             continue;
+                        // Only consider doors whose model is in the portal whitelist.
+                        // Vanilla "Marker_Prison.nif" and similar trigger objects are technically
+                        // teleport doors leading back to the source cell, but are not real architecture.
+                        {
+                            std::string destModel = ref.mBase->mModel;
+                            Misc::StringUtils::lowerCaseInPlace(destModel);
+                            const auto slash = destModel.find_last_of("/\\");
+                            const std::string_view fname = (slash != std::string::npos)
+                                ? std::string_view(destModel).substr(slash + 1)
+                                : std::string_view(destModel);
+                            if (!mPortalModels.count(std::string(fname)))
+                                continue;
+                        }
                         const ESM::Position& dPos = ref.mRef.getPosition();
                         const float distSq = (dPos.asVec3() - portal.destPoint).length2();
                         if (distSq >= bestDistSq)
@@ -1415,7 +1429,16 @@ namespace MWRender
         // where both doors happen to face the same world direction (e.g. Council Club vs Aurelia).
         {
             const osg::Vec3f toSourcePlayer = reverseArrival - pos;
-            if (toSourcePlayer.length2() > 1.f && portal.planeNormal * toSourcePlayer < 0.f)
+            const float dot = portal.planeNormal * toSourcePlayer;
+            Log(Debug::Info) << "Portal planeNormal check:"
+                << " pos=(" << pos << ")"
+                << " reverseArrival=(" << reverseArrival << ")"
+                << " toSourcePlayer=(" << toSourcePlayer << ")"
+                << " length2=" << toSourcePlayer.length2()
+                << " planeNormal=(" << portal.planeNormal << ")"
+                << " dot=" << dot
+                << " flip=" << (toSourcePlayer.length2() > 1.f && dot < 0.f);
+            if (toSourcePlayer.length2() > 1.f && dot < 0.f)
             {
                 nifRootQuat = nifRootQuat * osg::Quat(osg::PI, osg::Vec3f(0.f, 0.f, 1.f));
                 const osg::Quat fullRotFixed = cellRefRot * nifRootQuat;

@@ -87,3 +87,5 @@ jobs:
     uses: ./.github/workflows/windows.yml
     with:
       image: ${{ matrix.image }}
+      package: ${{ github.ref == 'refs/heads/master' }}
+      release: ${{ github.ref == 'refs/heads/master' }}
