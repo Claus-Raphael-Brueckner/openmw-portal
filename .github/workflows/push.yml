@@ -67,6 +67,8 @@ jobs:
     #     name: build_artifact.7z
 
   MacOS:
+    permissions:
+      contents: write
     strategy:
       fail-fast: true
       matrix:
@@ -76,6 +78,7 @@ jobs:
     uses: ./.github/workflows/macos.yml
     with:
       image: ${{ matrix.args.image }}
+      release: ${{ github.ref == 'refs/heads/master' }}
 
   Windows:
     permissions:
