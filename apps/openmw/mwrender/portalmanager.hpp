@@ -37,6 +37,11 @@ namespace Resource
     class ResourceSystem;
 }
 
+namespace Terrain
+{
+    class World;
+}
+
 namespace MWRender
 {
     class PortalRTTNode;
@@ -65,6 +70,9 @@ namespace MWRender
 
         /// Provide the main terrain root so exterior portals can share it in their RTT scene.
         void setExteriorTerrainNode(osg::Group* terrain) { mExteriorTerrainNode = terrain; }
+
+        /// Provide the terrain world so exterior portals can load cells when distant terrain is off.
+        void setTerrain(Terrain::World* terrain) { mTerrain = terrain; }
 
         /// Update the sky clear color for exterior portal RTTs (call each frame with current sky color).
         void setExteriorSkyColor(const osg::Vec4f& color) { mExteriorSkyColor = color; }
@@ -132,6 +140,7 @@ namespace MWRender
             bool noCollision     = false; ///< skip approach-zone ghost mode (e.g. Telvanni organic doors)
             float clipBias       = 0.f;   ///< units to push RTT clip plane into dest cell to clear flush wall geometry
             osg::ref_ptr<osg::Node> decorMesh; ///< optional decorative mesh rendered alongside the portal quad
+            std::vector<std::pair<int,int>> terrainCellsForPortal; ///< cells loaded for TerrainGrid fallback; unloaded on teardown
         };
 
         osg::Vec2f computeHalfExtents(const MWWorld::Ptr& door, osg::Vec3f& outCenter, osg::Quat& inOutNifRot) const;
@@ -152,7 +161,8 @@ namespace MWRender
         bool mGhostModeActive = false; ///< true while any portal has approachActive
         Resource::ResourceSystem* mResourceSystem;
         osg::Group* mRttParent;           ///< RTT nodes are added here (should outlive PortalManager)
-        osg::Group* mExteriorTerrainNode = nullptr; ///< shared terrain root for exterior portals
+        osg::Group* mExteriorTerrainNode = nullptr; ///< shared QuadTreeWorld root (distant terrain only)
+        Terrain::World* mTerrain = nullptr;          ///< fallback for TerrainGrid (no distant terrain)
         SkyManager* mSkyManager            = nullptr;
         SceneUtil::RTTNode* mReflectionRTT = nullptr; ///< kept for fallback; superseded by per-portal reflection RTTs
         osg::Vec4f  mExteriorSkyColor      = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f);

@@ -42,6 +42,9 @@
 #include <osgUtil/LineSegmentIntersector>
 #include <components/sceneutil/lightcontroller.hpp>
 
+#include <components/esm/util.hpp>
+#include <components/esm3/loadcell.hpp>
+#include <components/terrain/world.hpp>
 #include <components/esm3/loadacti.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
@@ -1647,10 +1650,33 @@ namespace MWRender
             // Quasi-exterior cells (Mournhold/Tribunal) can have large architecture meshes
             // whose ESM spawn position lies far from the portal door — use a wider search radius.
             const float sceneMaxDist = portal.destIsQuasiExterior ? 20000.f : 5000.f;
+            // QuadTreeWorld (distant terrain on) shares its root directly; it renders based on
+            // the RTT camera viewpoint. TerrainGrid (distant terrain off) uses getTerrainRoot()
+            // — cells around the exit door are loaded below after the scene is built.
+            osg::Group* terrainNodeForScene = mExteriorTerrainNode
+                ? mExteriorTerrainNode
+                : (mTerrain && (portal.destIsExterior || portal.destIsQuasiExterior)
+                    ? mTerrain->getTerrainRoot() : nullptr);
+
             PortalSceneResult sceneResult = buildPortalScene(
-                destCellStore, portal.destDoorPos, mResourceSystem, mExteriorTerrainNode,
+                destCellStore, portal.destDoorPos, mResourceSystem, terrainNodeForScene,
                 mSkyManager, osg::Vec2f(float(screenW), float(screenH)),
                 mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, sceneMaxDist, mPortalModels, mExteriorSkyColor);
+
+            // TerrainGrid fallback: load the 3×3 cells around the exit door. Also populate
+            // terrainCellsForPortal so update() can reload them each frame (the main scene
+            // may unload exterior cells at any time while the player is in the interior).
+            if (!mExteriorTerrainNode && mTerrain && (portal.destIsExterior || portal.destIsQuasiExterior))
+            {
+                const auto cellLoc = ESM::positionToExteriorCellLocation(
+                    portal.destDoorPos.x(), portal.destDoorPos.y(), ESM::Cell::sDefaultWorldspaceId);
+                for (int dx = -1; dx <= 1; ++dx)
+                    for (int dy = -1; dy <= 1; ++dy)
+                    {
+                        mTerrain->loadCell(cellLoc.mX + dx, cellLoc.mY + dy);
+                        portal.terrainCellsForPortal.emplace_back(cellLoc.mX + dx, cellLoc.mY + dy);
+                    }
+            }
 
 
             const bool hasWater = destCellStore && destCellStore->getCell()->hasWater();
@@ -1779,6 +1805,10 @@ namespace MWRender
                 if (auto* g = dynamic_cast<osg::Group*>(portal.portalScene->getChild(c)))
                     g->removeChild(mExteriorTerrainNode);
         }
+        // TerrainGrid fallback: clear the cell list. We do NOT call unloadCell() here because
+        // the main scene manages cell lifetime: if the player exited to the exterior, those cells
+        // are owned by the main game and must not be removed from under it.
+        portal.terrainCellsForPortal.clear();
 
         portal.quadNode->setCullCallback(nullptr);
         portal.quadNode->setNodeMask(0);
@@ -1866,6 +1896,15 @@ namespace MWRender
                 portal.sceneFog->setStart(mExteriorFogStart);
                 portal.sceneFog->setEnd(mExteriorFogEnd);
                 portal.sceneFog->setColor(mExteriorFogColor);
+            }
+            // TerrainGrid fallback: reload cells every frame. The main scene unloads exterior
+            // cells when the player enters an interior, but setupPortalRTT runs at the same time
+            // and its initial loadCell() calls are no-ops (cells still loaded then). By reloading
+            // here, we ensure terrain is present one frame after the main scene removes it.
+            if (!mExteriorTerrainNode && mTerrain && !portal.terrainCellsForPortal.empty())
+            {
+                for (auto& [cx, cy] : portal.terrainCellsForPortal)
+                    mTerrain->loadCell(cx, cy);
             }
         }
 

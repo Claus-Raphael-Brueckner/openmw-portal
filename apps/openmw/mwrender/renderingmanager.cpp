@@ -257,11 +257,13 @@ namespace MWRender
         mTerrain = chunkMgr.mTerrain.get();
         mGroundcover = chunkMgr.mGroundcover.get();
         mObjectPaging = chunkMgr.mObjectPaging.get();
-        // getQuadTreeRoot() returns the live quadtree node, valid even when terrain is disabled
-        // (e.g. player inside a cave). mTerrainRoot becomes empty on enable(false), so using
-        // getTerrainRoot() would give an empty node.
+        // QuadTreeWorld (distant terrain): share the live quad-tree root directly — valid even
+        // when terrain is disabled (enable(false) only removes it from mTerrainRoot, not from
+        // the portal scene). TerrainGrid: pass the terrain world so the portal can load the
+        // relevant cells on demand via the TerrainGrid fallback path.
         if (auto* qtWorld = dynamic_cast<Terrain::QuadTreeWorld*>(mTerrain))
             mPortalManager->setExteriorTerrainNode(qtWorld->getQuadTreeRoot());
+        mPortalManager->setTerrain(mTerrain);
         // Sky node set lazily via setSkyManager — mSky not yet constructed here.
 
         mStateUpdater = new SceneUtil::StateUpdater();
