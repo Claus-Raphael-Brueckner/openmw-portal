@@ -58,3 +58,5 @@ jobs:
         files: ${{ github.workspace }}/build/OpenMW-*.dmg
         prerelease: true
         draft: false
+        tag_name: latest
+        name: "Latest Build"

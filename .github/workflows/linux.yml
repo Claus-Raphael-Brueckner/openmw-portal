@@ -79,3 +79,5 @@ jobs:
         files: openmw-linux-${{ github.ref_name }}.tar.gz
         prerelease: true
         draft: false
+        tag_name: latest
+        name: "Latest Build"
