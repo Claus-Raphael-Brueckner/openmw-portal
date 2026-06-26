@@ -78,6 +78,8 @@ jobs:
       image: ${{ matrix.args.image }}
 
   Windows:
+    permissions:
+      contents: write
     strategy:
       fail-fast: true
       matrix:

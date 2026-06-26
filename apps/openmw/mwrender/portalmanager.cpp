@@ -1020,8 +1020,8 @@ namespace MWRender
         }
         else
         {
-            mPortalModels = std::unordered_set<std::string>(
-                sDefaultPortalModels.begin(), sDefaultPortalModels.end());
+            for (const std::string_view sv : sDefaultPortalModels)
+                mPortalModels.emplace(sv);
             std::ofstream out(filePath);
             if (out.is_open())
             {
