@@ -708,7 +708,6 @@ namespace MWRender
             MWWorld::CellStore* cellStore,
             Resource::ResourceSystem* resourceSystem,
             const osg::Vec3f& destCenter,
-            const std::unordered_set<std::string>& portalModels,
             float maxDist = 5000.f)
         {
             osg::ref_ptr<osg::Group> group = new osg::Group;
@@ -766,18 +765,11 @@ namespace MWRender
                 if (!ref.mBase || ref.mBase->mModel.empty()) continue;
                 if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef)) continue;
                 if (!ref.mData.isEnabled()) continue;
-                if (ref.mRef.getTeleport())
-                {
-                    // Interior destination: skip portal doors (portal quads handle those).
-                    // Exterior destination: show the original mesh so the door frame is visible.
-                    if (!cellStore->getCell()->isExterior()) continue;
-                    std::string m = ref.mBase->mModel;
-                    Misc::StringUtils::lowerCaseInPlace(m);
-                    bool known = false;
-                    for (const auto& p : portalModels)
-                        if (m.find(p) != std::string::npos) { known = true; break; }
-                    if (!known) continue;
-                }
+                // Portal quads never appear inside RTT views (Mask_PortalQuad excluded), so any other
+                // teleport door visible within this scene would otherwise leave a black hole (RTT clear
+                // color) where its mesh should be. Show the original mesh instead — every teleport door,
+                // not just ones on the portalModels whitelist, since that whitelist only controls which
+                // doors become live portals for the player, not which meshes are safe to display here.
                 const ESM::Position& pos = ref.mRef.getPosition();
                 const float dx = pos.pos[0] - destCenter.x();
                 const float dy = pos.pos[1] - destCenter.y();
@@ -831,10 +823,9 @@ namespace MWRender
             const osg::Vec4f& diffuse,
             const osg::Vec3f& sunDir,
             float maxDist,
-            const std::unordered_set<std::string>& portalModels,
             const osg::Vec4f& skyColor = osg::Vec4f(0.4f, 0.65f, 1.f, 1.f))
         {
-            osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, portalModels, maxDist);
+            osg::ref_ptr<osg::Group> statics = loadCellStatics(cellStore, resourceSystem, destCenter, maxDist);
             // One LightListCallback on the whole group with an explicit large bound so it always
             // intersects with any light in the scene. Individual PAT bounds may be invalid before
             // the first render, causing per-PAT callbacks to silently skip all lights.
@@ -1661,7 +1652,7 @@ namespace MWRender
             PortalSceneResult sceneResult = buildPortalScene(
                 destCellStore, portal.destDoorPos, mResourceSystem, terrainNodeForScene,
                 mSkyManager, osg::Vec2f(float(screenW), float(screenH)),
-                mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, sceneMaxDist, mPortalModels, mExteriorSkyColor);
+                mExteriorAmbient, mExteriorDiffuse, mExteriorSunDir, sceneMaxDist, mExteriorSkyColor);
 
             // TerrainGrid fallback: load the 3×3 cells around the exit door. Also populate
             // terrainCellsForPortal so update() can reload them each frame (the main scene
