@@ -41,6 +41,12 @@ set(BUILTIN_DATA_FILES
     textures/omw_xbox_button_rt.dds
     textures/omw/water_nm.png
 
+    # Decorative meshes drawn alongside portal quads, loaded by MWRender::PortalManager.
+    # Not in Morrowind's BSAs, hence the portal_ prefix and shipping them here.
+    meshes/i/portal_in_hlaalu_door.nif
+    meshes/i/portal_in_hlaalu_loaddoor_01.nif
+    meshes/x/portal_ex_mh_temple_door_01.nif
+
     fonts/DejaVuFontLicense.txt
     fonts/DejaVuLGCSansMono.ttf
     fonts/DejaVuLGCSansMono.omwfont
