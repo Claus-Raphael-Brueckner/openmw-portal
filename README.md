@@ -1,12 +1,29 @@
 OpenMW — Portal Rendering Fork
 ===============================
 
-> **This is an experimental hobby fork** that adds real-time portal rendering to OpenMW.
-> See [README-portal.md](README-portal.md) for details.
+> **This is an experimental hobby fork** of OpenMW that adds real-time portal rendering.
+> It has been stable in my own testing, but a few portals still don't work perfectly and
+> further bugs are to be expected. See [README-portal.md](README-portal.md) for details.
 
 ---
 
-<img width="1920" height="1080" alt="suran" src="https://github.com/user-attachments/assets/56fdbb6f-8719-4305-9566-45965ce6af10" />
+<table>
+  <tr>
+    <td><img src="docs/screenshots/01.jpg" width="200" alt="Seyda Neen"></td>
+    <td><img src="docs/screenshots/02.jpg" width="200" alt="Vivec"></td>
+    <td><img src="docs/screenshots/03.jpg" width="200" alt="Ald'ruhn-under-Skar"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/04.jpg" width="200" alt="Tamriel Rebuilt: Narsis"></td>
+    <td><img src="docs/screenshots/05.jpg" width="200" alt="Sadrith Mora"></td>
+    <td><img src="docs/screenshots/06.jpg" width="200" alt="Vivec 2"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/07.jpg" width="200" alt="Mournhold Temple"></td>
+    <td><img src="docs/screenshots/08.jpg" width="200" alt="Raven Rock"></td>
+    <td><img src="docs/screenshots/09.jpg" width="200" alt="Mournhold"></td>
+  </tr>
+</table>
 
 OpenMW
 ======
