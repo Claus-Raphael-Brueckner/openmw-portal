@@ -701,6 +701,19 @@ namespace MWRender
             size_t                          mLastUpdateTraversalNum = std::numeric_limits<size_t>::max();
         };
 
+        // Markers (PrisonMarker, TempleMarker, TravelMarker, …) are trigger objects, not architecture.
+        // The main scene never draws them: Scene::getModel() returns an empty model for them. Some are
+        // Static records, but PrisonMarker and friends are Door records carrying a teleport flag, so
+        // both loops below have to filter them or they show up as floating editor quads inside portals.
+        bool isMarkerRef(const ESM::RefId& refId, std::string_view model)
+        {
+            if (Misc::ResourceHelpers::isHiddenMarker(refId))
+                return true;
+            std::string m(model);
+            Misc::StringUtils::lowerCaseInPlace(m);
+            return m.find("marker") != std::string::npos;
+        }
+
         // Load static geometry from the destination cell into a plain group.
         // Only objects within maxDist (XY) of destCenter are included — important for exterior
         // cells that can contain thousands of statics spread across 8192×8192 units.
@@ -724,12 +737,8 @@ namespace MWRender
                 {
                     if (!ref.mBase || ref.mBase->mModel.empty())
                         continue;
-                    {
-                        std::string m = ref.mBase->mModel;
-                        Misc::StringUtils::lowerCaseInPlace(m);
-                        if (m.find("marker") != std::string::npos)
-                            continue;
-                    }
+                    if (isMarkerRef(ref.mRef.getRefId(), ref.mBase->mModel))
+                        continue;
                     if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef))
                         continue;
                     if (!ref.mData.isEnabled())
@@ -766,6 +775,9 @@ namespace MWRender
                 if (!ref.mBase || ref.mBase->mModel.empty()) continue;
                 if (!MWWorld::CellStore::isAccessible(ref.mData, ref.mRef)) continue;
                 if (!ref.mData.isEnabled()) continue;
+                // Marker doors have no portal quad (they are not on the whitelist) and no mesh in the
+                // main scene, so unlike a real door they leave nothing behind when skipped here.
+                if (isMarkerRef(ref.mRef.getRefId(), ref.mBase->mModel)) continue;
                 // Portal quads never appear inside RTT views (Mask_PortalQuad excluded), so any other
                 // teleport door visible within this scene would otherwise leave a black hole (RTT clear
                 // color) where its mesh should be. Show the original mesh instead — every teleport door,
