@@ -79,6 +79,7 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwworld/actionteleport.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
@@ -2224,6 +2225,13 @@ namespace MWRender
                 const float yawDelta = playerYaw - (srcNormalYaw + static_cast<float>(osg::PI));
                 ESM::Position destPos = portal.destPos;
                 destPos.rot[2] += yawDelta;
+
+                // Bring followers along, like classic door activation does via ActionTeleport.
+                // Must happen before the cell change: afterwards the source cell is unloaded and
+                // the followers can no longer be found. They arrive at the unmodified door
+                // destination, the same spot activating the door would have put them.
+                MWWorld::ActionTeleport::teleportFollowers(
+                    MWBase::Environment::get().getWorld()->getPlayerPtr(), destCell, portal.destPos);
 
                 // changeToCell is synchronous; may call destroyPortal invalidating mPortals.
                 MWBase::Environment::get().getWorld()->changeToCell(destCell, destPos, true, true, true);
